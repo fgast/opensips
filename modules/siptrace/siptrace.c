@@ -88,7 +88,6 @@ static str fromtag_column     = str_init("fromtag");     /* 12 */
 static str direction_column   = str_init("direction");   /* 13 */
 
 int trace_on   = 1;
-static int callbacks_registered=0;
 
 int *trace_on_flag = NULL;
 
@@ -248,6 +247,7 @@ struct module_exports exports = {
 	MOD_TYPE_DEFAULT,/* class of this module */
 	MODULE_VERSION,
 	DEFAULT_DLFLAGS, /* dlopen flags */
+	0,				 /* load function */
 	&deps,           /* OpenSIPS module dependencies */
 	cmds,       /* Exported functions */
 	0,          /* Exported async functions */
@@ -261,6 +261,7 @@ struct module_exports exports = {
 	0,          /* exported pseudo-variables */
 	0,			/* exported transformations */
 	0,          /* extra processes */
+	0,          /* module pre-initialization function */
 	mod_init,   /* module initialization function */
 	0,          /* response function */
 	destroy,    /* destroy function */
@@ -293,24 +294,12 @@ get_db_struct(str *url, str *tb_name, st_db_struct_t **st_db)
 	}
 
 	if (!DB_CAPABILITY(dbs->funcs, DB_CAP_INSERT)) {
-		LM_ERR("database modules does not provide all functions needed by module\n");
-		return -1;
-	}
-
-	if ((dbs->con=dbs->funcs.init(url)) == 0) {
-		LM_CRIT("Cannot connect to DB\n");
-		return -1;
-	}
-
-	if (db_check_table_version(&dbs->funcs, dbs->con,
-						&dbs->table, SIPTRACE_TABLE_VERSION) < 0) {
-		LM_ERR("error during table version check.\n");
+		LM_ERR("database modules does not provide all functions "
+			"needed by module\n");
 		return -1;
 	}
 
 	dbs->url = *url;
-	dbs->funcs.close(dbs->con);
-	dbs->con = 0;
 
 	*st_db = dbs;
 
@@ -474,7 +463,7 @@ static int parse_siptrace_id(str *suri)
 	str name={NULL, 0};
 	str trace_uri;
 	str param1={NULL, 0};
-	tlist_elem_p    elem;
+	tlist_elem_p elem;
 	enum types uri_type;
 
 
@@ -495,7 +484,8 @@ static int parse_siptrace_id(str *suri)
 		LM_ERR("bad format for uri {%.*s}\n", suri->len, suri->s);
 		return -1;
 	} else {
-		(suri->s++, suri->len--);                                 \
+		suri->s++;
+		suri->len--;
 	}
 
 	PARSE_NAME(suri, name); /*parse '[<name>]'*/
@@ -761,30 +751,63 @@ static int mod_init(void)
 
 	*trace_on_flag = trace_on;
 
-	/* initialize hep api */
+	/* initialize the trace IDs */
 	for (it=trace_list;it;it=it->next) {
-		if (it->type!=TYPE_HEP)
-			continue;
 
-		if (tprot.get_trace_dest_by_name == NULL) {
-			LM_DBG("Loading tracing protocol!\n");
-			/*
-			 * if more tracing protocols shall implement the api then
-			 * this should be a modparam
-			 */
-			if (trace_prot_bind(TRACE_PROTO, &tprot)) {
-				LM_ERR("Failed to bind tracing protocol!\n");
-				return -1;
-			}
-		}
+		switch (it->type) {
 
-		it->el.hep.hep_id = tprot.get_trace_dest_by_name(&it->el.hep.name);
-		if (it->el.hep.hep_id == NULL) {
-			LM_ERR("hep id not found!\n");
-			return -1;
-		}
-		LM_DBG("hep id {%.*s} loaded successfully!\n",
+			case TYPE_HEP:
+
+				if (tprot.get_trace_dest_by_name == NULL) {
+					LM_DBG("Loading tracing protocol!\n");
+					/*
+					 * if more tracing protocols shall implement the api then
+					 * this should be a modparam
+					 */
+					if (trace_prot_bind(TRACE_PROTO, &tprot)) {
+						LM_ERR("Failed to bind tracing protocol!\n");
+						return -1;
+					}
+				}
+
+				it->el.hep.hep_id = tprot.get_trace_dest_by_name
+					(&it->el.hep.name);
+				if (it->el.hep.hep_id == NULL) {
+					LM_ERR("hep id not found!\n");
+					return -1;
+				}
+				LM_DBG("hep id {%.*s} loaded successfully!\n",
 					it->el.hep.name.len, it->el.hep.name.s);
+
+				break;
+
+			case TYPE_DB:
+
+				if((it->el.db->con=it->el.db->funcs.init(&it->el.db->url))==0){
+					LM_CRIT("Cannot connect to DB <%.*s>\n",
+						it->el.db->url.len, it->el.db->url.s );
+					return -1;
+				}
+
+				if (db_check_table_version(&it->el.db->funcs, it->el.db->con,
+						&it->el.db->table, SIPTRACE_TABLE_VERSION) < 0) {
+					LM_ERR("failed to check table version for <%.*s>\n",
+						it->el.db->url.len, it->el.db->url.s );
+					return -1;
+				}
+				it->el.db->funcs.close(it->el.db->con);
+				it->el.db->con = 0;
+
+				break;
+
+			case TYPE_SIP:
+			case TYPE_END:
+
+				/* nothing to do here*/
+
+				break;
+		}
+
 	}
 
 	/* set db_keys/vals info */
@@ -833,6 +856,43 @@ static int mod_init(void)
 		if (tprot.get_trace_dest_by_name && !global_trace_api)
 			global_trace_api = &tprot;
 	}
+
+	/* load the module dependencies, best effort for now, as the strict 
+	 * dependency will be checked later in fixup function, according to 
+	 * the sip_trace() flags */
+	load_dlg_api(&dlgb);
+	load_tm_api(&tmb);
+
+	/* statelessly forwarded request callbacks */
+	if (register_slcb(SLCB_REQUEST_OUT, FL_USE_SIPTRACE,
+	trace_slreq_out) != 0) {
+		LM_ERR("can't register callback for statelessly "
+			"forwarded request\n");
+		return -1;
+	}
+
+	if (register_slcb(SLCB_REPLY_OUT, FL_USE_SIPTRACE,
+	trace_slreply_out) != 0) {
+		LM_ERR("can't register callback for statelessly "
+			"forwarded request\n");
+		return -1;
+	}
+
+	/* FIXME find a way to pass the flags and the trace_info_p 
+	 * parameter if there's any*/
+	#if 0
+	if (register_slcb(SLCB_ACK_IN, 0, trace_slack_in) != 0) {
+		LM_ERR("can't register callback for statelessly "
+			"forwarded request\n");
+		return -1;
+	}
+	#endif
+
+	/* register the context index for the tracing context
+	 * set a free function only if no TM, otherwise 
+	 * tm/dialog will free the structure */
+	sl_ctx_idx=context_register_ptr(CONTEXT_GLOBAL,
+			(tmb.t_gett==NULL)?free_trace_info_pkg:0);
 
 	return 0;
 }
@@ -1250,8 +1310,8 @@ static int sip_trace_fixup(void **param, int param_no)
 		if (gp->type==GPARAM_TYPE_STR) {
 			tparam->type = TYPE_LIST;
 			if ((tparam->u.lst=get_list_start(&gp->v.sval))==NULL) {
-				LM_ERR("Trace id <%.*s> used in sip_trace() function not defined!\n",
-						gp->v.sval.len, gp->v.sval.s);
+				LM_ERR("Trace id <%.*s> used in sip_trace() function "
+					"not defined!\n", gp->v.sval.len, gp->v.sval.s);
 				return -1;
 			}
 		} else if (gp->type==GPARAM_TYPE_PVS) {
@@ -1277,58 +1337,18 @@ static int sip_trace_fixup(void **param, int param_no)
 		}
 
 		if (_flags==TRACE_DIALOG) {
-			if (load_dlg_api(&dlgb)!=0) {
-				LM_ERR("Requested dialog trace but dialog module not loaded!\n");
+			if (dlgb.create_dlg==NULL) {
+				LM_ERR("Dialog tracing explicitly required, but"
+					"dialog module not loaded\n");
 				return -1;
 			}
-		}
-
-		if (_flags==TRACE_TRANSACTION||_flags==TRACE_DIALOG) {
-			if (load_tm_api(&tmb)!=0) {
-				if (_flags==TRACE_DIALOG) {
-					LM_ERR("Requested dialog trace "
-						"but dialog module not loaded!\n");
-					return -1;
-				} else {
-					LM_INFO("Will do stateless transaction aware tracing!\n");
-					LM_INFO("Siptrace will catch internally generated replies"
-							" and forwarded requests!\n");
-					_flags = TRACE_SL_TRANSACTION;
-				}
+		}else
+		if (_flags==TRACE_TRANSACTION) {
+			if (tmb.t_gett==NULL) {
+				LM_INFO("Will do stateless transaction aware tracing!\n");
+				LM_INFO("Siptrace will catch internally generated replies"
+						" and forwarded requests!\n");
 			}
-		}
-
-		/* register callbacks for forwarded messages and internally generated replies  */
-		if (!callbacks_registered && _flags != TRACE_MESSAGE) {
-			/* statelessly forwarded request callback  and its context index */
-			if (register_slcb(SLCB_REQUEST_OUT, FL_USE_SIPTRACE, trace_slreq_out) != 0) {
-				LM_ERR("can't register callback for statelessly forwarded request\n");
-				return -1;
-			}
-
-			if (register_slcb(SLCB_REPLY_OUT, FL_USE_SIPTRACE, trace_slreply_out) != 0) {
-				LM_ERR("can't register callback for statelessly forwarded request\n");
-				return -1;
-			}
-
-
-		/* FIXME find a way to pass the flags and the trace_info_p parameter
-		 * if there's any*/
-		#if 0
-			if (register_slcb(SLCB_ACK_IN, 0, trace_slack_in) != 0) {
-				LM_ERR("can't register callback for statelessly forwarded request\n");
-				return -1;
-			}
-		#endif
-
-			/* register the free function only in stateless mode
-			 * else tm/dialog will free the structure */
-			sl_ctx_idx=context_register_ptr(CONTEXT_GLOBAL,
-					_flags==TRACE_SL_TRANSACTION?free_trace_info_pkg:0);
-
-
-			/* avoid registering the callbacks mutliple times */
-			callbacks_registered=1;
 		}
 
 		*param = (void *)((unsigned long)_flags);
@@ -1442,10 +1462,8 @@ static int sip_trace_w(struct sip_msg *msg, char *param1,
 		if (dlgb.get_dlg && msg->first_line.type == SIP_REQUEST &&
 				msg->REQ_METHOD == METHOD_INVITE ) {
 			trace_flags=TRACE_DIALOG;
-		} else if (tmb.t_gett) {
-			trace_flags=TRACE_TRANSACTION;
 		} else {
-			trace_flags=TRACE_SL_TRANSACTION;
+			trace_flags=TRACE_TRANSACTION;
 		}
 	}
 
@@ -1459,21 +1477,11 @@ static int sip_trace_w(struct sip_msg *msg, char *param1,
 	}
 
 	if (trace_flags == TRACE_TRANSACTION &&
-		tmb.t_gett && msg->first_line.type == SIP_REQUEST &&
+		msg->first_line.type == SIP_REQUEST &&
 		(msg->REQ_METHOD != METHOD_ACK)) {
 		LM_DBG("tracing transaction!\n");
 	} else if (trace_flags == TRACE_TRANSACTION) {
 		LM_DBG("can't trace transaction! Will trace only this message!\n");
-		trace_flags = TRACE_MESSAGE;
-	}
-
-	if (trace_flags == TRACE_SL_TRANSACTION &&
-			msg->first_line.type == SIP_REQUEST &&
-				(msg->REQ_METHOD != METHOD_ACK)) {
-		LM_DBG("tracing stateless transaction!\n");
-	} else if (trace_flags == TRACE_SL_TRANSACTION) {
-		LM_DBG("can't trace stateless transaction! "
-					"Will trace only this message!\n");
 		trace_flags = TRACE_MESSAGE;
 	}
 
@@ -1522,7 +1530,8 @@ static int sip_trace_w(struct sip_msg *msg, char *param1,
 		}
 	/* for stateful transactions or dialogs
 	 * we need the structure in the shared memory */
-	} else if(trace_flags == TRACE_DIALOG || trace_flags == TRACE_TRANSACTION) {
+	} else if(trace_flags == TRACE_DIALOG ||
+	(trace_flags == TRACE_TRANSACTION && tmb.t_gett)) {
 		info=shm_malloc(sizeof(trace_info_t) + extra_len);
 		if (info==NULL) {
 			LM_ERR("no more shm!\n");
@@ -1538,7 +1547,7 @@ static int sip_trace_w(struct sip_msg *msg, char *param1,
 			memcpy(info->trace_attrs->s, trace_attrs.s, trace_attrs.len);
 			info->trace_attrs->len = trace_attrs.len;
 		}
-	} else if (trace_flags == TRACE_SL_TRANSACTION) {
+	} else if (trace_flags == TRACE_TRANSACTION && tmb.t_gett==NULL) {
 		/* we need this structure in pkg for stateless replies
 		 * and request out callback */
 		info=pkg_malloc(sizeof(trace_info_t));
@@ -1636,6 +1645,12 @@ static int sip_trace(struct sip_msg *msg, trace_info_p info)
 	if(parse_headers(msg, HDR_CALLID_F, 0)!=0)
 	{
 		LM_ERR("cannot parse call-id\n");
+		goto error;
+	}
+
+	if(msg->callid==NULL || msg->callid->body.s==NULL)
+	{
+		LM_ERR("cannot find Call-ID header!\n");
 		goto error;
 	}
 
@@ -1915,7 +1930,8 @@ static void trace_msg_out(struct sip_msg* msg, str  *sbuf,
 			db_vals[4].val.str_val.s = fromip_buff;
 			db_vals[4].val.str_val.len = nbuff - fromip_buff;
 			db_vals[5].val.str_val = send_sock->address_str;
-			db_vals[6].val.int_val = send_sock->port_no;
+			db_vals[6].val.int_val = send_sock->last_local_real_port?
+				send_sock->last_local_real_port:send_sock->port_no;
 		}
 	}
 
@@ -1925,7 +1941,10 @@ static void trace_msg_out(struct sip_msg* msg, str  *sbuf,
 	} else {
 		su2ip_addr(&to_ip, to);
 		set_sock_columns( db_vals[7], db_vals[8], db_vals[9], toip_buff,
-			&to_ip, (unsigned short)su_getport(to), proto);
+			&to_ip,
+			(unsigned long)(send_sock->last_remote_real_port?
+				send_sock->last_remote_real_port:su_getport(to)),
+			proto);
 	}
 
 	db_vals[10].val.time_val = time(NULL);
@@ -1988,7 +2007,7 @@ static void trace_onreply_in(struct cell* t, int type, struct tmcb_params *ps)
 
 	if(parse_headers(msg, HDR_CALLID_F|HDR_CSEQ_F, 0)!=0)
 	{
-		LM_ERR("cannot parse call-id\n");
+		LM_ERR("cannot parse Call-ID/CSeq\n");
 		return;
 	}
 
@@ -2004,6 +2023,12 @@ static void trace_onreply_in(struct cell* t, int type, struct tmcb_params *ps)
 	if(msg->callid==NULL || msg->callid->body.s==NULL)
 	{
 		LM_ERR("cannot find Call-ID header!\n");
+		goto error;
+	}
+
+	if(msg->cseq==NULL)
+	{
+		LM_ERR("cannot find CSeq header!\n");
 		goto error;
 	}
 
@@ -2104,6 +2129,12 @@ static void trace_onreply_out(struct cell* t, int type, struct tmcb_params *ps)
 		return;
 	}
 
+	if(msg->callid==NULL || msg->callid->body.s==NULL)
+	{
+		LM_ERR("cannot find Call-ID header!\n");
+		goto error;
+	}
+
 	sbuf = (str*)ps->extra1;
 	if(faked==0)
 	{
@@ -2131,13 +2162,6 @@ static void trace_onreply_out(struct cell* t, int type, struct tmcb_params *ps)
 			db_vals[0].val.str_val.s = t->uas.response.buffer.s;
 			db_vals[0].val.str_val.len = t->uas.response.buffer.len;
 		}
-	}
-
-	/* check Call-ID header */
-	if(msg->callid==NULL || msg->callid->body.s==NULL)
-	{
-		LM_ERR("cannot find Call-ID header!\n");
-		goto error;
 	}
 
 	db_vals[1].val.str_val.s = msg->callid->body.s;
@@ -2177,7 +2201,8 @@ static void trace_onreply_out(struct cell* t, int type, struct tmcb_params *ps)
 			db_vals[4].val.str_val.s = fromip_buff;
 			db_vals[4].val.str_val.len = nbuff - fromip_buff;
 			db_vals[5].val.str_val = dst->send_sock->address_str;
-			db_vals[6].val.int_val = dst->send_sock->port_no;
+			db_vals[6].val.int_val = dst->send_sock->last_local_real_port?
+				dst->send_sock->last_local_real_port:dst->send_sock->port_no;
 		}
 	}
 
@@ -2188,7 +2213,10 @@ static void trace_onreply_out(struct cell* t, int type, struct tmcb_params *ps)
 		memset(&to_ip, 0, sizeof(struct ip_addr));
 		su2ip_addr(&to_ip, &dst->to);
 		set_sock_columns( db_vals[7], db_vals[8], db_vals[9], toip_buff,
-			&to_ip, (unsigned long)su_getport(&dst->to), dst->proto);
+			&to_ip,
+			(unsigned long)(dst->send_sock->last_remote_real_port?
+				dst->send_sock->last_remote_real_port:su_getport(&dst->to)),
+			dst->proto);
 	}
 
 	db_vals[10].val.time_val = time(NULL);
@@ -2223,7 +2251,6 @@ static void trace_tm_out(struct cell* t, int type, struct tmcb_params *ps)
 		trace_onreply_out( t, type, ps);
 	}
 }
-
 
 /**
  * MI command format:
@@ -2671,9 +2698,6 @@ static int is_id_traced(int id, trace_info_p info)
 
 static int api_is_id_traced(int id)
 {
-	if (sl_ctx_idx < 0)
-		return -1;
-
 	return is_id_traced( id, GET_SIPTRACE_CONTEXT);
 }
 
@@ -2685,7 +2709,6 @@ int sip_context_trace_impl(int id, union sockaddr_union* from_su,
 	tlist_elem_p it;
 	trace_info_p info = GET_SIPTRACE_CONTEXT;
 	int hash;
-
 	trace_message trace_msg;
 
 	if (tprot.send_message == NULL) {

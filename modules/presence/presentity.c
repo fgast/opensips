@@ -73,7 +73,7 @@ int generate_ETag(int publ_count, str* etag)
 			prefix, (int)startup_time, pid, counter, publ_count);
 	if( etag->len <0 )
 	{
-		LM_ERR("unsuccessful sprintf\n ");
+		LM_ERR("unsuccessful sprintf\n");
 		return -1;
 	}
 	if(etag->len > ETAG_LEN)
@@ -127,7 +127,7 @@ int publ_send200ok(struct sip_msg *msg, int lexpire, str etag)
 	hdr_append2.len = sprintf(hdr_append2.s, "SIP-ETag: %.*s\r\n", etag.len, etag.s);
 	if(hdr_append2.len < 0)
 	{
-		LM_ERR("unsuccessful sprintf\n ");
+		LM_ERR("unsuccessful sprintf\n");
 		goto error;
 	}
 	if(hdr_append2.len+1 > size)
@@ -544,6 +544,13 @@ int update_presentity(struct sip_msg* msg, presentity_t* presentity,
 	}
 	else
 	{
+		query_cols[n_query_cols] = &str_etag_col;
+		query_ops[n_query_cols] = OP_EQ;
+		query_vals[n_query_cols].type = DB_STR;
+		query_vals[n_query_cols].nul = 0;
+		query_vals[n_query_cols].val.str_val = presentity->old_etag;
+		n_query_cols++;
+
 		lock_get(&pres_htable[hash_code].lock);
 		p = search_phtable_etag(&pres_uri, presentity->event->evp->parsed,
 				&presentity->old_etag, hash_code);
@@ -574,12 +581,6 @@ int update_presentity(struct sip_msg* msg, presentity_t* presentity,
 					LM_ERR("unsuccessful sql use table\n");
 					goto error;
 			}
-			query_cols[n_query_cols] = &str_etag_col;
-			query_ops[n_query_cols] = OP_EQ;
-			query_vals[n_query_cols].type = DB_STR;
-			query_vals[n_query_cols].nul = 0;
-			query_vals[n_query_cols].val.str_val = presentity->old_etag;
-			n_query_cols++;
 
 			if (pa_dbf.query (pa_db, query_cols, query_ops, query_vals,
 					 result_cols, n_query_cols, 1, 0, &result) < 0)
@@ -821,7 +822,8 @@ send_mxd_notify:
 	if(mix_dialog_presence && *pres_event_p &&
 	presentity->event->evp->parsed == EVENT_DIALOG)
 	{
-		str* dialog_body= NULL;
+		str* dialog_body = NULL;
+		pres_ev_t *ev_bk;
 
 		LM_DBG("Publish for event dialog - try to send Notify for presence\n");
 
@@ -829,11 +831,13 @@ send_mxd_notify:
 		if(dialog_body)
 		{
 			/* send Notify for presence */
+			ev_bk = presentity->event;
 			presentity->event = *pres_event_p;
 			if (publ_notify(presentity, pres_uri, 0, NULL, 0, dialog_body,
 			1, NULL)<0)
 			{
 				LM_ERR("while sending Notify requests to watchers\n");
+				presentity->event = ev_bk;
 				if(dialog_body && dialog_body!=FAKED_BODY)
 				{
 					xmlFree(dialog_body->s);
@@ -841,6 +845,7 @@ send_mxd_notify:
 				}
 				goto error;
 			}
+			presentity->event = ev_bk;
 			if(dialog_body && dialog_body!=FAKED_BODY)
 			{
 				xmlFree(dialog_body->s);
@@ -1023,7 +1028,7 @@ int pres_htable_restore(void)
 
 			if(insert_phtable(&uri, event, &etag, sphere, 0, 0)== NULL)
 			{
-				LM_ERR("inserting record in presentity hash table");
+				LM_ERR("inserting record in presentity hash table\n");
 				pkg_free(uri.s);
 				if(sphere)
 					pkg_free(sphere);

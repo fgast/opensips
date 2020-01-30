@@ -76,7 +76,8 @@ struct module_exports exports= {
 	MOD_TYPE_DEFAULT,/* class of this module */
 	MODULE_VERSION,		/* module version */
 	DEFAULT_DLFLAGS,	/* dlopen flags */
-	NULL,            /* OpenSIPS module dependencies */
+	0,					/* load function */
+	NULL,				/* OpenSIPS module dependencies */
 	cmds,				/* exported functions */
 	0,					/* exported async functions */
 	params,				/* exported parameters */
@@ -85,6 +86,7 @@ struct module_exports exports= {
 	NULL,				/* exported pseudo-variables */
 	0,					/* exported transformations */
 	0,					/* extra processes */
+	0,					/* module pre-initialization function */
 	mod_init,			/* module initialization function */
 	(response_function) NULL,	/* response handling function */
 	(destroy_function) mod_destroy,	/* destroy function */
@@ -118,7 +120,7 @@ static int mod_init(void)
 	/* parse the auth AVP spesc, if any */
 	if ( auth_username_avp || auth_password_avp || auth_realm_avp) {
 		if (!auth_username_avp || !auth_password_avp || !auth_realm_avp) {
-			LM_ERR("partial definition of auth AVP!");
+			LM_ERR("partial definition of auth AVP!\n");
 			return -1;
 		}
 		if ( parse_auth_avp(auth_realm_avp, &realm_spec, "realm")<0

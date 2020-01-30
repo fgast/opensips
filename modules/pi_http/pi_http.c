@@ -96,6 +96,7 @@ struct module_exports exports = {
 	MOD_TYPE_DEFAULT,                   /* class of this module */
 	MODULE_VERSION,
 	DEFAULT_DLFLAGS,                    /* dlopen flags */
+	0,				                    /* load function */
 	&deps,                              /* OpenSIPS module dependencies */
 	0,                                  /* exported functions */
 	0,                                  /* exported async functions */
@@ -105,6 +106,7 @@ struct module_exports exports = {
 	0,                                  /* exported PV */
 	0,									/* exported transformations */
 	0,                                  /* extra processes */
+	0,                                  /* module pre-initialization function */
 	mod_init,                           /* module initialization function */
 	(response_function) 0,              /* response handling function */
 	(destroy_function) destroy,         /* destroy function */
@@ -169,6 +171,7 @@ static int mod_init(void)
 	httpd_api.register_httpdcb(exports.name, &http_root,
 				&ph_answer_to_connection,
 				&ph_flush_data,
+				HTTPD_TEXT_HTML_TYPE,
 				&proc_init);
 
 	/* Build a cache of all provisionning commands */
@@ -202,7 +205,7 @@ static int child_init(int rank)
 	int i;
 
 	LM_DBG("Child initialization\n");
-	if (rank==PROC_TCP_MAIN || rank==PROC_BIN)
+	if (rank==PROC_TCP_MAIN)
 		return 0;
 
 

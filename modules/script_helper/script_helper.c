@@ -92,6 +92,7 @@ struct module_exports exports =
 	MOD_TYPE_DEFAULT, /* class of this module */
 	MODULE_VERSION,
 	DEFAULT_DLFLAGS,
+	0,
 	&deps,            /* OpenSIPS module dependencies */
 	cmds,
 	NULL,
@@ -100,6 +101,7 @@ struct module_exports exports =
 	NULL,
 	NULL,
 	NULL,			  /* exported transformations */
+	NULL,
 	NULL,
 	mod_init,
 	NULL,
@@ -139,7 +141,7 @@ int mod_init(void)
 
 	if (__register_script_cb(run_helper_logic,
 	                         PRE_SCRIPT_CB|REQ_TYPE_CB, NULL, -1) != 0) {
-		LM_ERR("cannot register script callback");
+		LM_ERR("cannot register script callback\n");
 		return -1;
 	}
 
@@ -157,8 +159,9 @@ int run_helper_logic(struct sip_msg *msg, void *param)
 	       msg->first_line.u.request.method.len,
 	       msg->first_line.u.request.method.s);
 
-	if (parse_headers(msg, HDR_TO_F|HDR_CALLID_F, 0) == -1) {
-		LM_ERR("failed to parse To header\n");
+	if (parse_headers(msg, HDR_TO_F|HDR_CALLID_F, 0) == -1 ||
+			!msg->to || !msg->callid) {
+		LM_ERR("failed to parse To/Call-ID header\n");
 		return SCB_DROP_MSG;
 	}
 
@@ -189,7 +192,7 @@ int run_helper_logic(struct sip_msg *msg, void *param)
 				return SCB_RUN_POST_CBS;
 			}
 
-			sl_api.reply(msg, 404, &status_404);
+			sl_api.reply(msg, 404, &status_404, NULL);
 			return SCB_RUN_POST_CBS;
 		}
 	}
@@ -223,7 +226,7 @@ int run_helper_logic(struct sip_msg *msg, void *param)
 		}
 
 		if (tm_api.t_relay(msg, NULL, NULL, NULL, NULL, NULL, NULL) < 0)
-			sl_api.reply(msg, 500, &status_500);
+			sl_api.reply(msg, 500, &status_500, NULL);
 
 		return SCB_RUN_POST_CBS;
 	}

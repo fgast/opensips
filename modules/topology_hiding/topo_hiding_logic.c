@@ -848,8 +848,7 @@ static void _th_no_dlg_onreply(struct cell* t, int type, struct tmcb_params *par
 
 	/* pass record route headers */
 	if(req->record_route){
-		if(print_rr_body(req->record_route, &rr_set, 0,
-							0) != 0 ){
+		if(print_rr_body(req->record_route, &rr_set, 0, 1, NULL) != 0 ){
 			LM_ERR("failed to print route records \n");
 			return;
 		}
@@ -936,7 +935,13 @@ static int topo_hiding_no_dlg(struct sip_msg *req,struct cell* t,int extra_flags
 
 static int topo_hiding_with_dlg(struct sip_msg *req,struct cell* t,struct dlg_cell* dlg,int extra_flags)
 {
+	int already_engaged = dlg_api.is_mod_flag_set(dlg,TOPOH_ONGOING);
+
 	dlg_api.set_mod_flag(dlg, TOPOH_ONGOING | extra_flags );
+	if (already_engaged) {
+		LM_DBG("topology hiding already engaged!\n");
+		return 1;
+	}
 
 	/* parse all headers to be sure that all RR and Contact hdrs are found */
 	if (parse_headers(req, HDR_EOH_F, 0)< 0) {
@@ -1001,7 +1006,7 @@ void th_loaded_callback(struct dlg_cell *dlg, int type,
 
 static void topo_unref_dialog(void *dialog)
 {
-	dlg_api.unref_dlg((struct dlg_cell*)dialog, 1);
+	dlg_api.dlg_unref((struct dlg_cell*)dialog, 1);
 }
 
 static void topo_dlg_initial_reply (struct dlg_cell* dlg, int type,
@@ -1073,12 +1078,12 @@ static void topo_dlg_onroute (struct dlg_cell* dlg, int type,
 	}
 
 	/* register tm callback for response in  */
-	dlg_api.ref_dlg(dlg,1);
+	dlg_api.dlg_ref(dlg,1);
 	if (tm_api.register_tmcb( req, 0, TMCB_RESPONSE_FWDED,
 	(dir==DLG_DIR_UPSTREAM)?th_down_onreply:th_up_onreply,
 	(void*)dlg, topo_unref_dialog)<0 ) {
 		LM_ERR("failed to register TMCB\n");
-		dlg_api.unref_dlg(dlg,1);
+		dlg_api.dlg_unref(dlg,1);
 		return;
 	}
 
@@ -1523,8 +1528,7 @@ static char* build_encoded_contact_suffix(struct sip_msg* msg,int *suffix_len)
 	}
 
 	if(msg->record_route){
-		if(print_rr_body(msg->record_route, &rr_set, !is_req,
-							0) != 0 ){
+		if(print_rr_body(msg->record_route, &rr_set, !is_req, 0, NULL) != 0){
 			LM_ERR("failed to print route records \n");
 			return NULL;
 		}

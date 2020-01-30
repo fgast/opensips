@@ -53,10 +53,10 @@
 	<row>
 		<entry>5. </entry>
 		<entry>Liviu Chircu (<ulink url="https://github.com/liviuchircu">@liviuchircu</ulink>)</entry>
-		<entry align="center">13</entry>
-		<entry align="center">10</entry>
-		<entry align="center">42</entry>
-		<entry align="center">81</entry>
+		<entry align="center">14</entry>
+		<entry align="center">11</entry>
+		<entry align="center">43</entry>
+		<entry align="center">82</entry>
 	</row>
 	<row>
 		<entry>6. </entry>
@@ -68,6 +68,14 @@
 	</row>
 	<row>
 		<entry>7. </entry>
+		<entry>Razvan Crainea (<ulink url="https://github.com/razvancrainea">@razvancrainea</ulink>)</entry>
+		<entry align="center">9</entry>
+		<entry align="center">7</entry>
+		<entry align="center">12</entry>
+		<entry align="center">14</entry>
+	</row>
+	<row>
+		<entry>8. </entry>
 		<entry>Juha Heinanen (<ulink url="https://github.com/juha-h">@juha-h</ulink>)</entry>
 		<entry align="center">8</entry>
 		<entry align="center">5</entry>
@@ -75,20 +83,12 @@
 		<entry align="center">53</entry>
 	</row>
 	<row>
-		<entry>8. </entry>
+		<entry>9. </entry>
 		<entry>Andrei Pelinescu-Onciul</entry>
 		<entry align="center">7</entry>
 		<entry align="center">5</entry>
 		<entry align="center">8</entry>
 		<entry align="center">2</entry>
-	</row>
-	<row>
-		<entry>9. </entry>
-		<entry>Razvan Crainea (<ulink url="https://github.com/razvancrainea">@razvancrainea</ulink>)</entry>
-		<entry align="center">6</entry>
-		<entry align="center">4</entry>
-		<entry align="center">9</entry>
-		<entry align="center">13</entry>
 	</row>
 	<row>
 		<entry>10. </entry>
@@ -128,23 +128,23 @@
 	<tbody>
 	<row>
 		<entry>1. </entry>
-		<entry>Bogdan-Andrei Iancu (<ulink url="https://github.com/bogdan-iancu">@bogdan-iancu</ulink>)</entry>
-		<entry align="center">Jun 2005 - Jun 2018</entry>
+		<entry>Razvan Crainea (<ulink url="https://github.com/razvancrainea">@razvancrainea</ulink>)</entry>
+		<entry align="center">Feb 2012 - Sep 2019</entry>
 	</row>
 	<row>
 		<entry>2. </entry>
 		<entry>Liviu Chircu (<ulink url="https://github.com/liviuchircu">@liviuchircu</ulink>)</entry>
-		<entry align="center">Jan 2013 - Jun 2018</entry>
+		<entry align="center">Jan 2013 - Nov 2018</entry>
 	</row>
 	<row>
 		<entry>3. </entry>
-		<entry>Vlad Patrascu (<ulink url="https://github.com/rvlad-patrascu">@rvlad-patrascu</ulink>)</entry>
-		<entry align="center">May 2017 - May 2017</entry>
+		<entry>Bogdan-Andrei Iancu (<ulink url="https://github.com/bogdan-iancu">@bogdan-iancu</ulink>)</entry>
+		<entry align="center">Jun 2005 - Jun 2018</entry>
 	</row>
 	<row>
 		<entry>4. </entry>
-		<entry>Razvan Crainea (<ulink url="https://github.com/razvancrainea">@razvancrainea</ulink>)</entry>
-		<entry align="center">Feb 2012 - Apr 2017</entry>
+		<entry>Vlad Patrascu (<ulink url="https://github.com/rvlad-patrascu">@rvlad-patrascu</ulink>)</entry>
+		<entry align="center">May 2017 - May 2017</entry>
 	</row>
 	<row>
 		<entry>5. </entry>
@@ -190,7 +190,7 @@
 	<title>Documentation</title>
 <section id="documentation_contributors" xreflabel="documentation_contributors">
 	<title>Contributors</title>
-	<para><emphasis role='bold'>Last edited by:</emphasis> Bogdan-Andrei Iancu (<ulink url="https://github.com/bogdan-iancu">@bogdan-iancu</ulink>), Liviu Chircu (<ulink url="https://github.com/liviuchircu">@liviuchircu</ulink>), Razvan Crainea (<ulink url="https://github.com/razvancrainea">@razvancrainea</ulink>), Irina-Maria Stanescu.</para>
+	<para><emphasis role='bold'>Last edited by:</emphasis> Bogdan-Andrei Iancu (<ulink url="https://github.com/bogdan-iancu">@bogdan-iancu</ulink>), Liviu Chircu (<ulink url="https://github.com/liviuchircu">@liviuchircu</ulink>), Razvan Crainea (<ulink url="https://github.com/razvancrainea">@razvancrainea</ulink>), Irina-Maria Stanescu, Daniel-Constantin Mierla (<ulink url="https://github.com/miconda">@miconda</ulink>), Konstantin Bokarius, Edson Gellert Schubert, Maksym Sobolyev (<ulink url="https://github.com/sobomax">@sobomax</ulink>), Juha Heinanen (<ulink url="https://github.com/juha-h">@juha-h</ulink>), Henning Westerholt (<ulink url="https://github.com/henningw">@henningw</ulink>), Ancuta Onofrei, Anatoly Pidruchny, Peter Nixon, Jan Janak (<ulink url="https://github.com/janakj">@janakj</ulink>), Andrei Pelinescu-Onciul, Jiri Kuthan (<ulink url="https://github.com/jiriatipteldotorg">@jiriatipteldotorg</ulink>).</para>
 </section>
 
 </chapter>

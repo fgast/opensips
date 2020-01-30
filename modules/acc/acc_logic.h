@@ -73,12 +73,6 @@
  * is valid
  */
 #define ACC_DLG_CB_USED (((unsigned long long)1<<(8*6)) * (1<<4))
-/*
- * flag to signal that the callback for missed calls has been registered;
- * this way if the missed calls flag is set twice, we won't register the
- * callback twice
- */
-#define ACC_TMCB_MISSED_REGISTERED (((unsigned long long)1<<(8*6)) * (1<<5))
 
 #define ACC_MASK_REF_BYTE (((unsigned long long)(0xFF)<<(8*7))
 
@@ -100,7 +94,7 @@
 #define ACC_PUT_TM_FLAGS(_t, _ptr) \
 	tmb.t_ctx_put_ptr(_t, acc_tm_flags_ctx_idx, _ptr)
 
-#define ACC_GET_CTX \
+#define ACC_GET_CTX() \
 	(acc_ctx_t *)context_get_ptr(CONTEXT_GLOBAL, current_processing_ctx, \
 			acc_flags_ctx_idx)
 
@@ -137,6 +131,8 @@ struct acc_enviroment {
 	str text;
 	struct timeval ts;
   event_id_t event;
+  evi_params_p ev_params_list;
+  evi_param_p *ev_params;
 };
 
 /* param trasnporter*/
@@ -209,5 +205,6 @@ acc_ctx_t* try_fetch_ctx(void);
 void unref_acc_ctx(void *);
 void free_global_acc_ctx(acc_ctx_t* ctx);
 void free_processing_acc_ctx(void* param);
+void free_extra_array(extra_value_t* array, int array_len);
 
 #endif

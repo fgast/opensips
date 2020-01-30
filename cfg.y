@@ -1691,7 +1691,7 @@ while_cmd:		WHILE exp stm				{ mk_action2( $$, WHILE_T,
 foreach_cmd:	FOR LPAREN script_var IN script_var RPAREN stm {
 					if ($3->type != PVT_SCRIPTVAR &&
 					    $3->type != PVT_AVP &&
-						$3->type != PVT_JSON) {
+						pv_type($3->type) != PVT_JSON) {
 						yyerror("\nfor-each statement: only \"var\", \"avp\" "
 					            "and \"json\" iterators are supported!");
 					}
@@ -1865,12 +1865,12 @@ module_func_param: STRING {
 
 route_param: STRING {
 						route_elems[0].type = STRING_ST;
-						route_elems[0].u.data = $1;
+						route_elems[0].u.string = $1;
 						$$=1;
 			}
-		| NUMBER {
+		| snumber {
 						route_elems[0].type = NUMBER_ST;
-						route_elems[0].u.data = (void*)(long)$1;
+						route_elems[0].u.number = (long)$1;
 						$$=1;
 			}
 		| NULLV {
@@ -1893,7 +1893,7 @@ route_param: STRING {
 							$$=$1+1;
 						}
 			}
-		| route_param COMMA NUMBER {
+		| route_param COMMA snumber {
 						if ($1>=MAX_ACTION_ELEMS) {
 							yyerror("too many arguments in function\n");
 							$$=-1;

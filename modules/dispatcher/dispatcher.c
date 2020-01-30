@@ -319,6 +319,7 @@ struct module_exports exports= {
 	MOD_TYPE_DEFAULT,/* class of this module */
 	MODULE_VERSION,
 	DEFAULT_DLFLAGS, /* dlopen flags */
+	0,				 /* load function */
 	&deps,           /* OpenSIPS module dependencies */
 	cmds,
 	0,
@@ -328,6 +329,7 @@ struct module_exports exports= {
 	0,          /* exported pseudo-variables */
 	0,			/* exported transformations */
 	0,          /* extra processes */
+	0,          /* module pre-initialization function */
 	mod_init,   /* module initialization function */
 	(response_function) 0,
 	(destroy_function) destroy,
@@ -736,6 +738,12 @@ static int mod_init(void)
 		ds_db_heads = &default_db_head;
 	}
 	set_default_head_values(&default_db_head);
+
+	if (!ds_db_heads) {
+		LM_ERR("missing default partition, "
+		       "please specify the 'db_url' parameter\n");
+		return -1;
+	}
 
 	ds_set_id_col.len = strlen(ds_set_id_col.s);
 	ds_dest_uri_col.len = strlen(ds_dest_uri_col.s);
@@ -1397,14 +1405,25 @@ static struct mi_root* ds_mi_list(struct mi_root* cmd_tree, void* param)
 {
 	struct mi_root* rpl_tree;
 	struct mi_node* part_node;
+	struct mi_node* kids;
 	int flags = 0;
+	int only_one = 0;
+	ds_partition_t *part_it = partitions;
 
-	if (cmd_tree->node.kids){
-		if(cmd_tree->node.kids->value.len == 4 && memcmp(cmd_tree->node.kids->value.s,"full",4)==0)
-			flags  |= MI_FULL_LISTING;
-		else
-			return init_mi_tree(400, MI_SSTR(MI_BAD_PARM_S));
-
+	kids = cmd_tree->node.kids;
+	if (kids){
+		part_it = find_partition_by_name(&kids->value);
+		if (part_it) {
+			kids = kids->next;
+			only_one = 1;
+		} else
+			part_it = partitions;
+		if (kids) {
+			if(kids->value.len == 4 && memcmp(kids->value.s,"full",4)==0)
+				flags  |= MI_FULL_LISTING;
+			else
+				return init_mi_tree(400, MI_SSTR(MI_BAD_PARM_S));
+		}
 	}
 
 	rpl_tree = init_mi_tree(200, MI_OK_S, MI_OK_LEN);
@@ -1412,8 +1431,7 @@ static struct mi_root* ds_mi_list(struct mi_root* cmd_tree, void* param)
 		return 0;
 	rpl_tree->node.flags |= MI_IS_ARRAY;
 
-	ds_partition_t *part_it;
-	for (part_it = partitions; part_it; part_it = part_it->next) {
+	for (; part_it; part_it = part_it->next) {
 		part_node = add_mi_node_child(&rpl_tree->node, MI_IS_ARRAY,"PARTITION",
 				9, part_it->name.s, part_it->name.len);
 
@@ -1423,6 +1441,8 @@ static struct mi_root* ds_mi_list(struct mi_root* cmd_tree, void* param)
 		free_mi_tree(rpl_tree);
 		return 0;
 		}
+		if (only_one)
+			break;
 	}
 
 	return rpl_tree;

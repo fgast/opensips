@@ -762,11 +762,15 @@ void ds_flusher_routine(unsigned int ticks, void* param)
 		val_set.type = DB_INT;
 		val_set.nul  = 0;
 
+		/* access ds data under reader's lock */
+		lock_start_read( partition->lock );
+
 		/* update the gateways */
 		if (partition->dbf.use_table(*partition->db_handle,
 					&partition->table_name) < 0) {
 			LM_ERR("cannot select table \"%.*s\"\n",
 				partition->table_name.len, partition->table_name.s);
+			lock_stop_read( partition->lock );
 			continue;
 		}
 		key_cmp[0] = &ds_set_id_col;
@@ -803,6 +807,8 @@ void ds_flusher_routine(unsigned int ticks, void* param)
 				}
 			}
 		}
+
+		lock_stop_read( partition->lock );
 	}
 
 	return;
@@ -1743,7 +1749,7 @@ int ds_select_dst(struct sip_msg *msg, ds_select_ctl_p ds_select_ctl,
 
 	if(rc == 0){
 		selected->chosen_count++;
-		LM_DBG("aici_intrat [%hu]\n", selected->chosen_count);
+		LM_DBG("chosen count: %hu\n", selected->chosen_count);
 	}
 
 
@@ -2028,48 +2034,49 @@ int ds_set_state(int group, str *address, int state, int type,
 					/* this destination switched state between 
 					 * disabled <> enabled -> update active info */
 					re_calculate_active_dsts( idx );
+
+				/* trigger the event */
+				if (dispatch_evi_id == EVI_ERROR) {
+					LM_ERR("event not registered %d\n", dispatch_evi_id);
+				} else if (evi_probe_event(dispatch_evi_id)) {
+					if (!(list = evi_get_params())) {
+						lock_stop_read( partition->lock );
+						return 0;
+					}
+					if (partition != default_partition
+					&& evi_param_add_str(list,&partition_str,&partition->name)){
+						LM_ERR("unable to add partition parameter\n");
+						evi_free_params(list);
+						lock_stop_read( partition->lock );
+						return 0;
+					}
+					if (evi_param_add_int(list, &group_str, &group)) {
+						LM_ERR("unable to add group parameter\n");
+						evi_free_params(list);
+						lock_stop_read( partition->lock );
+						return 0;
+					}
+					if (evi_param_add_str(list, &address_str, address)) {
+						LM_ERR("unable to add address parameter\n");
+						evi_free_params(list);
+						lock_stop_read( partition->lock );
+						return 0;
+					}
+					if (evi_param_add_str(list, &status_str,
+								type ? &inactive_str : &active_str)) {
+						LM_ERR("unable to add status parameter\n");
+						evi_free_params(list);
+						lock_stop_read( partition->lock );
+						return 0;
+					}
+
+					if (evi_raise_event(dispatch_evi_id, list)) {
+						LM_ERR("unable to send event\n");
+					}
+				}
+
 			}
 
-			if (dispatch_evi_id == EVI_ERROR) {
-				LM_ERR("event not registered %d\n", dispatch_evi_id);
-			} else if (evi_probe_event(dispatch_evi_id)) {
-				if (!(list = evi_get_params())) {
-					lock_stop_read( partition->lock );
-					return 0;
-				}
-				if (partition != default_partition
-				&& evi_param_add_str(list,&partition_str,&partition->name)){
-					LM_ERR("unable to add partition parameter\n");
-					evi_free_params(list);
-					lock_stop_read( partition->lock );
-					return 0;
-				}
-				if (evi_param_add_int(list, &group_str, &group)) {
-					LM_ERR("unable to add group parameter\n");
-					evi_free_params(list);
-					lock_stop_read( partition->lock );
-					return 0;
-				}
-				if (evi_param_add_str(list, &address_str, address)) {
-					LM_ERR("unable to add address parameter\n");
-					evi_free_params(list);
-					lock_stop_read( partition->lock );
-					return 0;
-				}
-				if (evi_param_add_str(list, &status_str,
-							type ? &inactive_str : &active_str)) {
-					LM_ERR("unable to add status parameter\n");
-					evi_free_params(list);
-					lock_stop_read( partition->lock );
-					return 0;
-				}
-
-				if (evi_raise_event(dispatch_evi_id, list)) {
-					LM_ERR("unable to send event\n");
-				}
-			} else {
-				LM_DBG("no event sent\n");
-			}
 			lock_stop_read( partition->lock );
 			return 0;
 		}
@@ -2100,7 +2107,7 @@ int ds_is_in_list(struct sip_msg *_m, gparam_t *gp_ip, gparam_t *gp_port,
 		return -1;
 	}
 
-	if ( (ip=str2ip( &val.rs ))==NULL ) {
+	if ( (ip=str2ip( &val.rs ))==NULL && (ip=str2ip6( &val.rs ))==NULL ) {
 		LM_ERR("IP val is not IP <%.*s>\n",val.rs.len,val.rs.s);
 		return -1;
 	}

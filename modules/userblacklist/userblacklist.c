@@ -34,6 +34,7 @@
 #include "../../ut.h"
 #include "../../mod_fix.h"
 #include "../../db/db.h"
+#include "../../ipc.h"
 
 #include "dt.h"
 #include "db.h"
@@ -115,6 +116,7 @@ struct module_exports exports= {
 	MOD_TYPE_DEFAULT,/* class of this module */
 	MODULE_VERSION,
 	DEFAULT_DLFLAGS,
+	0,               /* load function */
 	&deps,           /* OpenSIPS module dependencies */
 	cmds,
 	NULL,
@@ -123,6 +125,7 @@ struct module_exports exports= {
 	mi_cmds,
 	0,
 	0,				 /* exported transformations */
+	0,
 	0,
 	mod_init,
 	0,
@@ -280,11 +283,11 @@ static int check_user_blacklist(struct sip_msg *msg, char* str1, char* str2, cha
 
 	if (dt_longest_match(dt_root, req_number, &whitelist) >= 0) {
 		if (whitelist) {
-			/* LM_ERR("whitelisted"); */
+			/* LM_ERR("whitelisted\n"); */
 			return 1; /* found, but is whitelisted */
 		}
 	} else {
-		/* LM_ERR("not found"); */
+		/* LM_ERR("not found\n"); */
 		return 1; /* not found is ok */
 	}
 
@@ -362,7 +365,7 @@ static int check_blacklist_fixup(void **arg, int arg_no)
 	}
 	/* try to add the table */
 	if (add_source(table) != 0) {
-		LM_ERR("could not add table");
+		LM_ERR("could not add table\n");
 		return -1;
 	}
 
@@ -426,13 +429,13 @@ static int check_blacklist(struct sip_msg *msg, struct check_blacklist_fs_t *arg
 	LM_DBG("check entry %s\n", req_number);
 	if (dt_longest_match(arg1->dt_root, req_number, &whitelist) >= 0) {
 		if (whitelist) {
-			/* LM_DBG("whitelisted"); */
+			/* LM_DBG("whitelisted\n"); */
 			lock_release(lock);
 			return 1; /* found, but is whitelisted */
 		}
 	}
 	else {
-		/* LM_ERR("not found"); */
+		/* LM_ERR("not found\n"); */
 		lock_release(lock);
 		return 1; /* not found is ok */
 	}
@@ -560,13 +563,29 @@ static int mod_init(void)
 	return 0;
 }
 
+/* simple wrapper over reload_sources() to make it compatible with ipc_rpc_f,
+ * so triggerable via IPC */
+static void rpc_reload_sources(int sender_id, void *unused)
+{
+	reload_sources();
+}
+
 
 static int child_init(int rank)
 {
+	if (rank==PROC_TCP_MAIN)
+		return 0;
+
 	if (db_init(&db_url, &db_table) != 0) return -1;
 	if (dt_init(&dt_root) != 0) return -1;
-	/* because we've added new sources during the fixup */
-	if (reload_sources() != 0) return -1;
+
+	/* because we've added new sources during the fixup
+	 * -> if child 1, send a job to itself to run the data loading after
+	 * the init sequance is done */
+	if ( (rank==1) && ipc_send_rpc( process_no, rpc_reload_sources, NULL)<0) {
+		LM_CRIT("failed to RPC the data loading\n");
+		return -1;
+	}
 
 	return 0;
 }

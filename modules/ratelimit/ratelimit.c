@@ -55,7 +55,7 @@ gen_lock_t * rl_lock;
 static double * rl_load_value;     /* actual load, used by PIPE_ALGO_FEEDBACK */
 static double * pid_kp, * pid_ki, * pid_kd, * pid_setpoint; /* PID tuning params */
 static int * drop_rate;         /* updated by PIPE_ALGO_FEEDBACK */
-static int *rl_feedback_limit;
+int *rl_feedback_limit;
 
 int * rl_network_load;	/* network load */
 int * rl_network_count;	/* flag for counting network algo users */
@@ -185,7 +185,8 @@ struct module_exports exports= {
 	MOD_TYPE_DEFAULT,/* class of this module */
 	MODULE_VERSION,
 	DEFAULT_DLFLAGS,	/* dlopen flags */
-	&deps,            /* OpenSIPS module dependencies */
+	0,					/* load function */
+	&deps,				/* OpenSIPS module dependencies */
 	cmds,
 	NULL,
 	params,
@@ -194,6 +195,7 @@ struct module_exports exports= {
 	mod_items,			/* exported pseudo-variables */
 	0,					/* exported transformations */
 	0,					/* extra processes */
+	0,					/* module pre-initialization function */
 	mod_init,			/* module initialization function */
 	0,
 	mod_destroy,		/* module exit function */
@@ -218,7 +220,7 @@ int get_cpuload(void)
 	fclose(f);
 
 	if (scan_res <= 0) {
-		LM_ERR("/proc/stat didn't contain expected values");
+		LM_ERR("/proc/stat didn't contain expected values\n");
 		return -1;
 	}
 
@@ -476,79 +478,59 @@ static inline int hist_check(rl_pipe_t *pipe, int update)
 	#define U2MILI(__usec__) (__usec__/1000)
 	#define S2MILI(__sec__)  (__sec__ *1000)
 	int i;
-	int first_good_index;
+	int now_index;
 	int rl_win_ms = rl_window_size * 1000;
-
-
-	unsigned long long now_total, start_total;
+	unsigned long long now_time, start_time;
 
 	struct timeval tv;
 
-	/* first get values from our beloved replicated friends
-	 * current pipe counter will be calculated after this
-	 * iteration; no need for the old one */
 	pipe->counter = 0;
 	pipe->counter = rl_get_all_counters(pipe);
 
 	gettimeofday(&tv, NULL);
-	if (pipe->rwin.start_time.tv_sec == 0) {
-		/* the lucky one to come first here */
+	now_time = S2MILI(tv.tv_sec) + U2MILI(tv.tv_usec);
+	now_index = (now_time%rl_win_ms) / rl_slot_period;
+
+	start_time = S2MILI(pipe->rwin.start_time.tv_sec)
+		+ U2MILI(pipe->rwin.start_time.tv_usec);
+
+	if ( (pipe->rwin.start_time.tv_sec == 0) ||   /* first run*/
+	(now_time - start_time >= rl_win_ms) ) {      /* or more than one window */
+		//LM_DBG("case 1 - start=%lld/%d, now=%lld/%d, diff=%lld\n",
+		//	start_time, pipe->rwin.start_index, now_time, now_index,
+		//	now_time-start_time);
+		memset(pipe->rwin.window, 0,
+			pipe->rwin.window_size * sizeof(long int));
 		pipe->rwin.start_time = tv;
-		pipe->rwin.start_index = 0;
+		pipe->rwin.start_index = now_index;
+		pipe->rwin.window[now_index] = update;
 
-		/* we know it starts from 0 because we did memset when created*/
-		pipe->rwin.window[pipe->rwin.start_index] += update;
-	} else {
-		start_total = S2MILI(pipe->rwin.start_time.tv_sec)
-							+ U2MILI(pipe->rwin.start_time.tv_usec);
-
-		now_total = S2MILI(tv.tv_sec) + U2MILI(tv.tv_usec);
-
-		/* didn't do any update to the window for "2*window_size" secs
-		 * we can't use any elements from the vector
-		 * the window is invalidated; very unlikely to happen*/
-		if (now_total - start_total >= 2*rl_win_ms) {
-			memset(pipe->rwin.window, 0,
-					pipe->rwin.window_size * sizeof(long int));
-
-			pipe->rwin.start_index = 0;
-			pipe->rwin.start_time = tv;
-			pipe->rwin.window[pipe->rwin.start_index] += update;
-		} else if (now_total - start_total >= rl_win_ms) {
-			/* current time in interval [window_size; 2*window_size)
-			 * all the elements in [start_time; (ctime-window_size+1) are
-			 * invalidated(set to 0)
-			 * */
-			/* the first window index not to be set to 0
-			 * number of slots from the start_index*/
-			first_good_index = ((((now_total - rl_win_ms) - start_total)
-							/rl_slot_period + 1) + pipe->rwin.start_index) %
-							pipe->rwin.window_size;
-
-			/* the new start time will be the start time of the first slot */
-			start_total = (now_total - rl_win_ms) -
-					(now_total - rl_win_ms)%rl_slot_period+ rl_slot_period;
-
-			pipe->rwin.start_time.tv_sec  = start_total/1000;
-			pipe->rwin.start_time.tv_usec = (start_total%1000)*1000;
-
-
-			for (i=pipe->rwin.start_index; i != first_good_index;
-										i=(i+1)%pipe->rwin.window_size)
+	} else
+	if (now_time - start_time >= rl_slot_period) {
+		/* different slot */
+		//LM_DBG("case 2 - start=%lld/%d, now=%lld/%d, diff=%lld\n",
+		//	start_time, pipe->rwin.start_index, now_time, now_index,
+		//	now_time-start_time);
+		/* zero the gap between old/start index and current/now index */
+		for ( i=(pipe->rwin.start_index+1)%pipe->rwin.window_size;
+			i != now_index;
+			i=(i+1)%pipe->rwin.window_size)
 				pipe->rwin.window[i] = 0;
+		/* update the time/index of the last counting */
+		pipe->rwin.start_time = tv;
+		pipe->rwin.start_index = now_index;
 
-			pipe->rwin.start_index = first_good_index;
+		/* count current call; it will be the last element in the window */
+		pipe->rwin.window[now_index] = update;
 
-			/* count current call; it will be the last element in the window */
-			pipe->rwin.window[((pipe->rwin.start_index)
-					+ (pipe->rwin.window_size-1)) % pipe->rwin.window_size] += update;
-
-		} else { /* now_total - start_total < rl_win_ms  */
-			/* no need to modify the window, the value is inside it;
-			 * we just need to increment the number of calls for
-			 * the current slot*/
-			pipe->rwin.window[(now_total-start_total)/rl_slot_period] += update;
-		}
+	} else {
+		/* index the same slot */
+		/* we just need to increment the number of calls for
+		 * the current slot*/
+		//LM_DBG("case 3 - start=%lld/%d, now=%lld/%d, diff=%lld\n",
+		//	start_time, pipe->rwin.start_index, now_time, now_index,
+		//	now_time-start_time);
+		pipe->rwin.window[pipe->rwin.start_index] += update;
 	}
 
 	/* count the total number of calls in the window */
@@ -600,9 +582,9 @@ int rl_pipe_check(rl_pipe_t *pipe)
 		case PIPE_ALGO_RED:
 			if (!pipe->load)
 				return 1;
-			return counter % pipe->load ? -1 : 1;
+			return (counter % pipe->load ? -1 : 1);
 		case PIPE_ALGO_NETWORK:
-			return pipe->load;
+			return (pipe->load ? pipe->load : 1);
 		case PIPE_ALGO_FEEDBACK:
 			return (hash[counter % 100] < *drop_rate) ? -1 : 1;
 		case PIPE_ALGO_HISTORY:
@@ -847,6 +829,7 @@ static int pv_parse_rl_count(pv_spec_p sp, str *in)
 	}
 	sp->pvp.pvn.type = PV_NAME_INTSTR;
 	sp->pvp.pvn.u.isname.name.s = *in;
+	sp->pvp.pvn.u.isname.type = AVP_NAME_STR;
 	return 0;
 
 }

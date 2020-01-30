@@ -203,6 +203,11 @@ void route_timer_f(unsigned int ticks, void* param)
 	struct action* a = (struct action*)param;
 	static struct sip_msg* req= NULL;
 
+	if(a == NULL) {
+		LM_ERR("NULL action\n");
+		return;
+	}
+
 	if(req == NULL)
 	{
 		req = (struct sip_msg*)pkg_malloc(sizeof(struct sip_msg));
@@ -211,20 +216,16 @@ void route_timer_f(unsigned int ticks, void* param)
 			LM_ERR("No more memory\n");
 			return;
 		}
-		memset(req, 0, sizeof(struct sip_msg));
-		req->first_line.type = SIP_REQUEST;
-		req->first_line.u.request.method.s= "DUMMY";
-		req->first_line.u.request.method.len= 5;
-		req->first_line.u.request.uri.s= "sip:user@domain.com";
-		req->first_line.u.request.uri.len= 19;
-		req->rcv.src_ip.af = AF_INET;
-		req->rcv.dst_ip.af = AF_INET;
 	}
 
-	if(a == NULL) {
-		LM_ERR("NULL action\n");
-		return;
-	}
+	memset(req, 0, sizeof(struct sip_msg));
+	req->first_line.type = SIP_REQUEST;
+	req->first_line.u.request.method.s= "DUMMY";
+	req->first_line.u.request.method.len= 5;
+	req->first_line.u.request.uri.s= "sip:user@domain.com";
+	req->first_line.u.request.uri.len= 19;
+	req->rcv.src_ip.af = AF_INET;
+	req->rcv.dst_ip.af = AF_INET;
 
 	run_top_route(a, req);
 
@@ -617,13 +618,13 @@ inline static int handle_io(struct fd_map* fm, int idx,int event_type)
 			handle_timer_job();
 			break;
 		case F_SCRIPT_ASYNC:
-			async_script_resume_f( &fm->fd, fm->data);
+			async_script_resume_f( fm->fd, fm->data);
 			break;
 		case F_FD_ASYNC:
-			async_fd_resume( &fm->fd, fm->data);
+			async_fd_resume( fm->fd, fm->data);
 			break;
 		case F_LAUNCH_ASYNC:
-			async_launch_resume( &fm->fd, fm->data);
+			async_launch_resume( fm->fd, fm->data);
 			break;
 		case F_IPC:
 			ipc_handle_job(fm->fd);
@@ -682,7 +683,7 @@ int start_timer_extra_processes(int *chd_rank)
 				goto error;
 			}
 
-			report_conditional_status( 1, 0);
+			report_conditional_status( (!no_daemon_mode), 0);
 
 			/* launch the reactor */
 			reactor_main_loop( 1/*timeout in sec*/, error , );

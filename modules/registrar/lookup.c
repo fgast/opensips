@@ -251,7 +251,8 @@ ucontact_t **select_contacts(struct sip_msg *msg, ucontact_t *contacts,
 		*ret = 1;
 
 		if (count == selected_cts_sz - 1) {
-			doubled = pkg_realloc(selected_cts, 2 * selected_cts_sz);
+			doubled = pkg_realloc(selected_cts,
+					2 * selected_cts_sz * sizeof *selected_cts);
 			if (!doubled) {
 				LM_ERR("oom\n");
 				return NULL;
@@ -293,32 +294,24 @@ int parse_lookup_flags(const str *input, unsigned int *flags, regex_t *ua_re,
 		case 'r': *flags |= REG_BRANCH_AOR_LOOKUP_FLAG; break;
 		case 'u':
 			if (input->s[i+1] != '/') {
-				LM_ERR("no regexp start after 'u' flag");
+				LM_ERR("no regexp start after 'u' flag\n");
 				break;
 			}
 			i++;
 			re_end = q_memchr(input->s + i + 1, '/', input->len - i - 1);
 			if (!re_end) {
-				LM_ERR("no regexp end after 'u' flag");
+				LM_ERR("no regexp end after 'u' flag\n");
 				break;
 			}
 			i++;
 			re_len = re_end - input->s - i;
 			if (re_len == 0) {
-				LM_ERR("empty regexp");
+				LM_ERR("empty regexp\n");
 				break;
 			}
 			ua = input->s + i;
 			*flags |= REG_LOOKUP_UAFILTER_FLAG;
 			LM_DBG("found regexp /%.*s/", re_len, ua);
-
-			ua[re_len] = '\0';
-			if (regcomp(ua_re, ua, *regexp_flags) != 0) {
-				LM_ERR("bad regexp '%s'\n", ua);
-				ua[re_len] = '/';
-				return -1;
-			}
-			ua[re_len] = '/';
 
 			i += re_len;
 			break;
@@ -342,6 +335,16 @@ int parse_lookup_flags(const str *input, unsigned int *flags, regex_t *ua_re,
 	}
 
 	LM_DBG("final flags: %d\n", *flags);
+
+	if (*flags & REG_LOOKUP_UAFILTER_FLAG) {
+		ua[re_len] = '\0';
+		if (regcomp(ua_re, ua, *regexp_flags) != 0) {
+			LM_ERR("bad regexp '%s'\n", ua);
+			ua[re_len] = '/';
+			return -1;
+		}
+		ua[re_len] = '/';
+	}
 
 	return 0;
 }
@@ -368,12 +371,11 @@ int lookup(struct sip_msg* _m, char* _t, char* _f, char* _s)
 	int rc, ret = -1;
 	str flags_s, sip_instance = STR_NULL, call_id = STR_NULL;
 	regex_t ua_re;
-	pv_value_t val;
 
 	flags = 0;
 	if (_f && _f[0] != '\0') {
 		if (fixup_get_svalue( _m, (gparam_p)_f, &flags_s) != 0) {
-			LM_ERR("invalid owner uri parameter");
+			LM_ERR("invalid flags parameter\n");
 			return -1;
 		}
 
@@ -405,18 +407,12 @@ int lookup(struct sip_msg* _m, char* _t, char* _f, char* _s)
 	}
 
 	if (_s) {
-		if (pv_get_spec_value( _m, (pv_spec_p)_s, &val)!=0) {
-			LM_ERR("failed to get PV value\n");
+		if (fixup_get_svalue(_m, (gparam_p)_s, &uri) != 0) {
+			LM_ERR("failed to get a string value for the 'AoR' parameter\n");
 			return -1;
 		}
-		if ( (val.flags&PV_VAL_STR)==0 ) {
-			LM_ERR("PV vals is not string\n");
-			return -1;
-		}
-		uri = val.rs;
 	} else {
-		if (_m->new_uri.s) uri = _m->new_uri;
-		else uri = _m->first_line.u.request.uri;
+		uri = *GET_RURI(_m);
 	}
 
 	if (extract_aor(&uri, &aor, &sip_instance, &call_id) < 0) {

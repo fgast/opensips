@@ -145,6 +145,7 @@ int acc_created_avp_id = -1;
 /* acc context position */
 int acc_flags_ctx_idx;
 int acc_tm_flags_ctx_idx;
+int acc_dlg_ctx_idx;
 
 /* ------------- fixup function --------------- */
 static int acc_fixup(void** param, int param_no);
@@ -269,6 +270,7 @@ static module_dependency_t *get_deps_detect_dir(param_export_t *param)
 static dep_export_t deps = {
 	{ /* OpenSIPS module dependencies */
 		{ MOD_TYPE_DEFAULT, "tm", DEP_ABORT  },
+		{ MOD_TYPE_DEFAULT, "dialog", DEP_SILENT  },
 		{ MOD_TYPE_NULL, NULL, 0 },
 	},
 	{ /* modparam dependencies */
@@ -279,11 +281,30 @@ static dep_export_t deps = {
 	},
 };
 
+static int mod_preinit(void)
+{
+	if (load_dlg_api(&dlg_api) != 0) {
+		LM_DBG("failed to load dialog API - is the dialog module loaded?\n");
+		return 0;
+	}
+
+	if (!dlg_api.get_dlg) {
+		LM_ERR("error loading dialog module - cdrs cannot be generated\n");
+		return 0;
+	}
+	acc_dlg_ctx_idx = dlg_api.dlg_ctx_register_ptr(unref_acc_ctx);
+
+	is_cdr_enabled = 1;
+
+	return 0;
+}
+
 struct module_exports exports= {
 	"acc",
 	MOD_TYPE_DEFAULT,/* class of this module */
 	MODULE_VERSION,  /* module version */
 	DEFAULT_DLFLAGS, /* dlopen flags */
+	0,				 /* load function */
 	&deps,           /* OpenSIPS module dependencies */
 	cmds,       /* exported functions */
 	0,          /* exported async functions */
@@ -293,6 +314,7 @@ struct module_exports exports= {
 	mod_items,  /* exported pseudo-variables */
 	0,			/* exported transformations */
 	0,          /* extra processes */
+	mod_preinit,/* pre-initialization module */
 	mod_init,   /* initialization module */
 	0,          /* response function */
 	0,          /* destroy function */
@@ -333,6 +355,8 @@ static int acc_fixup(void** param, int param_no)
 		*param = (void*)model;
 		return 0;
 	} else if (param_no == 2) {
+		init_db_url(db_url, 1 /* can be null */);
+
 		/* only for db acc - the table name */
 		if (db_url.s==0) {
 			pkg_free(s.s);
@@ -360,8 +384,8 @@ static int mod_init( void )
 {
 	LM_INFO("initializing...\n");
 
-	if (db_url.s)
-		db_url.len = strlen(db_url.s);
+	init_db_url(db_url, 1 /* can be null */);
+
 	db_table_acc.len = strlen(db_table_acc.s);
 	db_table_mc.len = strlen(db_table_mc.s);
 	acc_method_col.len = strlen(acc_method_col.s);
@@ -378,7 +402,7 @@ static int mod_init( void )
 		if (tmp != -1)
 			acc_log_facility = tmp;
 		else {
-			LM_ERR("invalid log facility configured");
+			LM_ERR("invalid log facility configured\n");
 			return -1;
 		}
 	}
@@ -417,7 +441,7 @@ static int mod_init( void )
 		}
 	} else {
 		if (db_extra_tags || db_leg_tags) {
-			LM_ERR("leg and/or extra fields defined but no DB url!\n");
+			LM_ERR("DB leg and/or extra fields defined but no DB url!\n");
 			return -1;
 		}
 	}
@@ -431,7 +455,7 @@ static int mod_init( void )
 		}
 	} else {
 		if (aaa_extra_tags || aaa_leg_tags) {
-			LM_ERR("leg and/or extra fields defined but no AAA url!\n");
+			LM_ERR("AAA leg and/or extra fields defined but no AAA url!\n");
 			return -1;
 		}
 		aaa_proto_url = NULL;
@@ -446,6 +470,11 @@ static int mod_init( void )
 
 	acc_flags_ctx_idx = context_register_ptr(CONTEXT_GLOBAL, unref_acc_ctx);
 	acc_tm_flags_ctx_idx = tmb.t_ctx_register_ptr(unref_acc_ctx);
+
+	if (is_cdr_enabled && dlg_api.register_dlgcb(NULL,
+				DLGCB_LOADED,acc_loaded_callback, NULL, NULL) < 0)
+			LM_ERR("cannot register callback for dialog loaded - accounting "
+					"for ongoing calls will be lost after restart\n");
 
 	return 0;
 }

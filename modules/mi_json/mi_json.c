@@ -93,6 +93,7 @@ struct module_exports exports = {
 	MOD_TYPE_DEFAULT,			/* class of this module */
 	MODULE_VERSION,
 	DEFAULT_DLFLAGS,			/* dlopen flags */
+	0,							/* load function */
 	&deps,						/* OpenSIPS module dependencies */
 	NULL,						/* exported functions */
 	NULL,						/* exported async functions */
@@ -101,7 +102,8 @@ struct module_exports exports = {
 	NULL,						/* exported MI functions */
 	NULL,						/* exported PV */
 	NULL,						/* exported transformations */
-	0,							/* extra processes */
+	NULL,						/* extra processes */
+	NULL,						/* module initialization function */
 	mod_init,					/* module initialization function */
 	(response_function) 0,		/* response handling function */
 	(destroy_function) destroy,	/* destroy function */
@@ -148,6 +150,7 @@ static int mod_init(void)
 	httpd_api.register_httpdcb(exports.name, &http_root,
 				&mi_json_answer_to_connection,
 				&mi_json_flush_data,
+				HTTPD_APPLICATION_JSON_CNT_TYPE,
 				&proc_init);
 
 	if (trace_destination_name.s) {

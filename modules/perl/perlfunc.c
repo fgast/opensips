@@ -122,7 +122,7 @@ int perl_parse_params(struct sip_msg *msg, char *fnc, char *prm,
 int perl_exec_simple(char* fnc, char* args[], int flags) {
 
 	if (perl_checkfnc(fnc)) {
-		LM_DBG("running perl function \"%s\"", fnc);
+		LM_DBG("running perl function \"%s\"\n", fnc);
 
 		call_argv(fnc, flags, args);
 	} else {
@@ -211,7 +211,7 @@ int perl_exec2(struct sip_msg* _msg, char* fnc, char* mystr) {
 	case SIP_REPLY:
 		break;
 	default:
-		LM_ERR("invalid firstline");
+		LM_ERR("invalid firstline\n");
 		return -1;
 	}
 

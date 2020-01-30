@@ -603,7 +603,7 @@ int b2b_prescript_f(struct sip_msg *msg, void *uparam)
 		/* send 200 OK and exit */
 		tmb.t_reply(msg, 200, &reason);
 		tm_tran = tmb.t_gett();
-		if(tm_tran)
+		if(tm_tran && tm_tran!=T_UNDEFINED)
 			tmb.unref_cell(tm_tran);
 
 		/* No need to apply lumps */
@@ -1143,7 +1143,8 @@ b2b_dlg_t* b2b_new_dlg(struct sip_msg* msg, str* local_contact,
 
 	if(msg->record_route!=NULL && msg->record_route->body.s!= NULL)
 	{
-		if( print_rr_body(msg->record_route, &dlg.route_set[CALLER_LEG], (init_dlg?1:0), 0)!= 0)
+		if( print_rr_body(msg->record_route, &dlg.route_set[CALLER_LEG],
+		(init_dlg?1:0), 0, NULL)!= 0)
 		{
 			LM_ERR("failed to process record route\n");
 		}
@@ -1154,12 +1155,6 @@ b2b_dlg_t* b2b_new_dlg(struct sip_msg* msg, str* local_contact,
 		dlg.contact[CALLER_LEG]=*local_contact;
 	else
 		dlg.contact[CALLEE_LEG]=*local_contact;
-
-	if (!msg->content_length)
-	{
-		LM_ERR("no Content-Length header found!\n");
-		return 0;
-	}
 
 	if(!init_dlg) /* called from server_new on initial Invite */
 	{
@@ -1868,7 +1863,7 @@ dlg_leg_t* b2b_new_leg(struct sip_msg* msg, str* to_tag, int mem_type)
 
 	if(msg->record_route!=NULL && msg->record_route->body.s!= NULL)
 	{
-		if( print_rr_body(msg->record_route, &route_set, 1, 0)!= 0)
+		if( print_rr_body(msg->record_route, &route_set, 1, 0, NULL)!= 0)
 		{
 			LM_ERR("failed to process record route\n");
 			goto error;
@@ -1883,7 +1878,7 @@ dlg_leg_t* b2b_new_leg(struct sip_msg* msg, str* to_tag, int mem_type)
 
 	if(new_leg == NULL)
 	{
-		LM_ERR("No more shared memory");
+		LM_ERR("No more shared memory\n");
 		if(route_set.s)
 			pkg_free(route_set.s);
 		goto error;
@@ -2008,7 +2003,7 @@ static int build_extra_headers_from_msg(str buf, str *extra_hdr,
 	req.buf = buf.s;
 	req.len = buf.len;
 	if (parse_msg(buf.s, buf.len, &req)!=0) {
-		LM_CRIT("BUG - buffer parsing failed!");
+		LM_CRIT("BUG - buffer parsing failed!\n");
 		return -1;
 	}
 	/* parse all headers */

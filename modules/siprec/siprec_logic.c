@@ -217,7 +217,7 @@ static int srec_b2b_notify(struct sip_msg *msg, str *key, int type, void *param)
 	LM_DBG("received b2b reply with code %d\n", msg->REPLY_STATUS);
 
 	ret = 0;
-	/* check if the reply was successfully */
+	/* check if the reply was successful */
 	if (msg->REPLY_STATUS < 200) {
 		/* wait for a final reply */
 		return 0;
@@ -262,7 +262,7 @@ static int srec_b2b_notify(struct sip_msg *msg, str *key, int type, void *param)
 		}
 
 		/* no need to keep ref on the dialog, since we rely on it from now on */
-		srec_dlg.unref_dlg(ss->dlg, 1);
+		srec_dlg.dlg_unref(ss->dlg, 1);
 		/* also, the b2b ref moves on the dialog - so we avoid a ref-unref */
 	}
 
@@ -282,7 +282,7 @@ no_recording:
 	srec_logic_destroy(ss);
 
 	/* we finishd everything with the dialog, let it be! */
-	srec_dlg.unref_dlg(ss->dlg, 1);
+	srec_dlg.dlg_unref(ss->dlg, 1);
 	ss->dlg = NULL;
 	SIPREC_UNREF(ss);
 	return ret;
@@ -360,6 +360,7 @@ static int srs_send_invite(struct src_sess *sess)
 	ci.to_uri = ci.req_uri;
 	ci.from_uri = ci.to_uri;
 	ci.extra_headers = &extra_headers;
+	ci.send_sock = sess->socket;
 
 	ci.local_contact.s = contact_builder(sess->socket, &ci.local_contact.len);
 
@@ -477,7 +478,7 @@ static void tm_update_recording(struct cell *t, int type, struct tmcb_params *ps
 		return;
 
 	tmp = (struct _tm_src_param *)*ps->param;
-	/* engage only on successfull calls */
+	/* engage only on successful calls */
 	SIPREC_LOCK(tmp->ss);
 	src_update_recording(ps->rpl, tmp->ss, tmp->part_no);
 	SIPREC_UNLOCK(tmp->ss);
@@ -491,7 +492,7 @@ void tm_start_recording(struct cell *t, int type, struct tmcb_params *ps)
 		return;
 
 	ss = (struct src_sess *)*ps->param;
-	/* engage only on successfull calls */
+	/* engage only on successful calls */
 	SIPREC_LOCK(ss);
 	/* if session has been started, do not start it again */
 	if (ss->flags & SIPREC_STARTED)

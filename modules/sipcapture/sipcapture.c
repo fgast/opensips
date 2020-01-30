@@ -572,7 +572,7 @@ static acmd_export_t acmds[] = {
 };
 
 static proc_export_t procs[] = {
-        {"RAW receiver",  0,  0, raw_socket_process, 1, 0},
+        {"RAW receiver",  0,  0, raw_socket_process, 1, PROC_FLAG_INITCHILD},
         {0,0,0,0,0,0}
 };
 
@@ -697,6 +697,7 @@ struct module_exports exports = {
 	MOD_TYPE_DEFAULT,/* class of this module */
 	MODULE_VERSION,
 	DEFAULT_DLFLAGS, /*!< dlopen flags */
+	0,				 /*!< load function */
 	&deps,           /* OpenSIPS module dependencies */
 	cmds,       /*!< Exported functions */
 	acmds,          /*!< Exported async functions */
@@ -710,6 +711,7 @@ struct module_exports exports = {
 	mod_items,          /*!< exported pseudo-variables */
 	0,                  /*!< exported transformations */
 	procs,          /*!< extra processes */
+	0,          /*!< module pre-initialization function */
 	mod_init,   /*!< module initialization function */
 	0,          /*!< response function */
 	destroy,    /*!< destroy function */
@@ -798,11 +800,6 @@ static int mod_init(void) {
 			if ( parse_hep_route(hep_route_name) < 0 ) {
 				LM_ERR("bad hep route name %s\n", hep_route_name);
 				return -1;
-			}
-
-			if (hep_route_id > HEP_SIP_ROUTE) {
-				/* builds a dummy message for being able to use the hep route */
-				build_dummy_msg();
 			}
 		}
 
@@ -1736,7 +1733,7 @@ static int pv_get_hep_net(struct sip_msg *msg, pv_param_t *param,
 
 	ctx = HEP_GET_CONTEXT(hep_api);
 	if (ctx == NULL) {
-		LM_ERR("Hep context not there!");
+		LM_ERR("Hep context not there!\n");
 		return -1;
 	}
 
@@ -1853,7 +1850,7 @@ static int pv_get_hep_version(struct sip_msg *msg, pv_param_t *param,
 
 	ctx = HEP_GET_CONTEXT(hep_api);
 	if (ctx == NULL) {
-		LM_ERR("Hep context not there!");
+		LM_ERR("Hep context not there!\n");
 		return -1;
 	}
 
@@ -2426,6 +2423,10 @@ int hep_msg_received(void)
 		/* don't go through the main route */
 		return HEP_SCRIPT_SKIP;
 	} else if (hep_route_id > HEP_SIP_ROUTE) {
+
+		/* builds a dummy message */
+		build_dummy_msg();
+
 		/* set request route type */
 		set_route_type( REQUEST_ROUTE );
 
@@ -2435,6 +2436,7 @@ int hep_msg_received(void)
 		/* free possible loaded avps */
 		reset_avps();
 
+		free_sip_msg( &dummy_req );
 
 		/* requested to go through the main sip route */
 		if (ctx->resume_with_sip) {
@@ -4648,7 +4650,7 @@ static int build_hep_buf(str* hep_buf, int* proto)
 
 	ctx = HEP_GET_CONTEXT(hep_api);
 	if (ctx == NULL) {
-		LM_ERR("Hep context not there!");
+		LM_ERR("Hep context not there!\n");
 		return -1;
 	}
 
@@ -5174,7 +5176,7 @@ static int report_capture(struct sip_msg* msg, str* table, str* cor_id,
 		}
 	} else if ( homerV == HOMER6 ) {
 		/* only warn; continue as usual */
-		LM_WARN("using homer6 but hepv2 message received!");
+		LM_WARN("using homer6 but hepv2 message received!\n");
 	}
 
 	/* each query has it's own parameters for the prepared statements */

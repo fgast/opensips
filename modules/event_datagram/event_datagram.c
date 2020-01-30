@@ -72,6 +72,7 @@ struct module_exports exports= {
 	MOD_TYPE_DEFAULT,/* class of this module */
 	MODULE_VERSION,
 	DEFAULT_DLFLAGS,			/* dlopen flags */
+	0,							/* load function */
 	NULL,            /* OpenSIPS module dependencies */
 	0,							/* exported functions */
 	0,							/* exported asyn functions */
@@ -81,6 +82,7 @@ struct module_exports exports= {
 	0,							/* exported pseudo-variables */
 	0,			 				/* exported transformations */
 	0,							/* extra processes */
+	0,							/* module pre-initialization function */
 	mod_init,					/* module initialization function */
 	0,							/* response handling function */
 	destroy,					/* destroy function */
@@ -277,7 +279,7 @@ static str datagram_print(evi_reply_sock *sock)
 	datagram_print_s.len = 0;
 
 	if (!sock) {
-		LM_DBG("Nothing to print");
+		LM_DBG("Nothing to print\n");
 		goto end;
 	}
 

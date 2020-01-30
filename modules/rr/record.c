@@ -282,14 +282,11 @@ int record_route(struct sip_msg* _m, str *params)
 		&& ap->before->u.cond==COND_FALSE) {
 			/* found our phony anchor lump */
 			/* jump over the anchor and conditional lumps */
-			lp = ap->before->before;
-			/* unlink it */
-			ap->before->before = NULL;
-			ap->type = 0;
+			lp = dup_lump_list(ap->before->before);
 			/* if double routing, make a copy of the buffered lumps for the
 			   second route hdr. */
 			if (enable_double_rr)
-				lp2 = dup_lump_list(lp);
+				lp2 = dup_lump_list(ap->before->before);
 			break;
 		}
 	}
@@ -430,10 +427,7 @@ int record_route_preset(struct sip_msg* _m, str* _data)
 		&& ap->before->u.cond==COND_FALSE) {
 			/* found our phony anchor lump */
 			/* jump over the anchor and conditional lumps */
-			lp = ap->before->before;
-			/* unlink it */
-			ap->before->before = NULL;
-			ap->type = 0;
+			lp = dup_lump_list(ap->before->before);
 			/* link the pending buffered params and go at the end of the list*/
 			for ( l2->before = lp ; l2 && l2->before ; l2=l2->before);
 			break;
@@ -441,7 +435,7 @@ int record_route_preset(struct sip_msg* _m, str* _data)
 	}
 
 	if (!(l2=insert_new_lump_before(l2, term, RR_TERM_LEN, 0))) {
-		LM_ERR("failed to insert term lump");
+		LM_ERR("failed to insert term lump\n");
 		goto error;
 	}
 	term = NULL;

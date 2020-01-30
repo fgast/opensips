@@ -45,6 +45,7 @@
 int ping_interval = DEFAULT_PING_INTERVAL;
 int node_timeout = DEFAULT_NODE_TIMEOUT;
 int ping_timeout = DEFAULT_PING_TIMEOUT;
+int seed_fb_interval = DEFAULT_SEED_FB_INTERVAL;
 int current_id = -1;
 int db_mode = 1;
 
@@ -127,6 +128,7 @@ static param_export_t params[] = {
 	{"ping_interval",		INT_PARAM,	&ping_interval		},
 	{"node_timeout",		INT_PARAM,	&node_timeout		},
 	{"ping_timeout",		INT_PARAM,	&ping_timeout		},
+	{"seed_fallback_interval", INT_PARAM, &seed_fb_interval	},
 	{"id_col",				STR_PARAM,	&id_col.s			},
 	{"cluster_id_col",		STR_PARAM,	&cluster_id_col.s	},
 	{"node_id_col",			STR_PARAM,	&node_id_col.s		},
@@ -194,6 +196,7 @@ struct module_exports exports = {
 	MOD_TYPE_DEFAULT,		/* class of this module */
 	MODULE_VERSION,
 	DEFAULT_DLFLAGS,		/* dlopen flags */
+	0,						/* load function */
 	&deps,            		/* OpenSIPS module dependencies */
 	cmds,					/* exported functions */
 	0,						/* exported async functions */
@@ -203,6 +206,7 @@ struct module_exports exports = {
 	0,						/* exported pseudo-variables */
 	0,						/* exported transformations */
 	0,						/* extra processes */
+	0,						/* module pre-initialization function */
 	mod_init,				/* module initialization function */
 	0,						/* response handling function */
 	destroy,				/* destroy function */
@@ -231,10 +235,11 @@ do { \
 				col_name.s);	\
 			return -1;	\
 		}	\
-		pe = q_memchr(p + 1, ',', descr->s + descr->len - p - 1);	\
-		aux.s = p + 1;	\
-		aux.len = pe ? pe - p - 1 : descr->s + descr->len - p - 1;	\
-		if (aux.s >= descr->s + descr->len || !aux.len) {	\
+		p++;	\
+		pe = q_memchr(p, ',', descr->s + descr->len - p);	\
+		aux.s = p;	\
+		aux.len = pe ? pe - p : descr->s + descr->len - p;	\
+		if (aux.len == 0) {	\
 			LM_ERR("<%.*s> value expected\n", col_name.len,	\
 				col_name.s);	\
 			return -1;	\
@@ -246,17 +251,17 @@ do { \
 					col_name.s);	\
 				return -1;	\
 			}	\
-		} else \
-			str_vals[(_col_idx)] = aux.len ? aux.s : NULL;	\
+		} else	\
+			str_vals[(_col_idx)] = aux;	\
 	} else {	\
 		if ((_type) == 0)	\
 			int_vals[(_col_idx)] = -1;	\
 		else	\
-			str_vals[(_col_idx)] = NULL;	\
+			str_vals[(_col_idx)].s = NULL;	\
 	}	\
 } while(0)
 
-int parse_param_node_info(str *descr, int *int_vals, char **str_vals)
+int parse_param_node_info(str *descr, int *int_vals, str *str_vals)
 {
 	char *p, *pe;
 	str aux;
@@ -310,6 +315,10 @@ static int mod_init(void)
 		LM_WARN("Invalid ping_timeout parameter, using default value\n");
 		ping_timeout = DEFAULT_PING_TIMEOUT;
 	}
+	if (seed_fb_interval < 0) {
+		LM_WARN("Invalid seed_fallback_interval parameter, using default value\n");
+		seed_fb_interval = DEFAULT_SEED_FB_INTERVAL;
+	}
 
 	/* create & init lock */
 	if ((cl_list_lock = lock_init_rw()) == NULL) {
@@ -355,6 +364,9 @@ static int mod_init(void)
 			LM_ERR("Failed to load info from DB\n");
 			goto error;
 		}
+
+		dr_dbf.close(db_hdl);
+		db_hdl = NULL;
 	}
 
 	/* register timer */
@@ -375,11 +387,17 @@ static int mod_init(void)
 		}
 	}
 
-	if (bin_register_cb(&cl_internal_cap, bin_rcv_cl_packets, NULL) < 0) {
+	if (seed_fb_interval && register_utimer("cl-seed-fb-check", seed_fb_check_timer,
+		NULL, SEED_FB_CHECK_INTERVAL*1000, TIMER_FLAG_DELAY_ON_DELAY) < 0) {
+		LM_CRIT("Unable to register clusterer seed check timer\n");
+		goto error;
+	}
+
+	if (bin_register_cb(&cl_internal_cap, bin_rcv_cl_packets, NULL, 0) < 0) {
 		LM_CRIT("Cannot register clusterer binary packet callback!\n");
 		goto error;
 	}
-	if (bin_register_cb(&cl_extra_cap, bin_rcv_cl_extra_packets, NULL) < 0) {
+	if (bin_register_cb(&cl_extra_cap, bin_rcv_cl_extra_packets, NULL, 0) < 0) {
 		LM_CRIT("Cannot register extra clusterer binary packet callback!\n");
 		goto error;
 	}
@@ -404,6 +422,13 @@ error:
 /* initialize child */
 static int child_init(int rank)
 {
+	if (db_mode) {
+		/* init DB connection */
+		if ((db_hdl = dr_dbf.init(&clusterer_db_url)) == 0) {
+			LM_ERR("cannot initialize database connection\n");
+			return -1;
+		}
+	}
 	return 0;
 }
 
@@ -423,6 +448,15 @@ static struct mi_root* clusterer_reload(struct mi_root* root, void *param)
 	}
 
 	lock_start_write(cl_list_lock);
+	if (preserve_reg_caps(new_info) < 0) {
+		lock_stop_write(cl_list_lock);
+		LM_ERR("Failed to preserve registered capabilities\n");
+
+		if (new_info)
+			free_info(new_info);
+
+		return init_mi_tree(500, "Failed to reload", 16);
+	}
 	old_info = *cluster_list;
 	*cluster_list = new_info;
 	lock_stop_write(cl_list_lock);
@@ -537,7 +571,7 @@ static struct mi_root * clusterer_list(struct mi_root *cmd_tree, void *param)
 			lock_release(n_info->lock);
 
 			n_hop = get_next_hop(n_info); 
-			if (n_hop <= 0)
+			if (!n_hop)
 				val = str_none;
 			else
 				val.s = int2str(n_hop, &val.len);
@@ -813,7 +847,7 @@ static struct mi_root* cluster_send_mi(struct mi_root *cmd, void *param)
 	/* send MI cmd in cluster */
 	rc = send_mi_cmd(cluster_id, node_id, cl_cmd_name, cl_cmd_params, no_params);
 	switch (rc) {
-		case CLUSTERER_SEND_SUCCES:
+		case CLUSTERER_SEND_SUCCESS:
 			LM_DBG("MI command <%.*s> sent\n", cl_cmd_name.len, cl_cmd_name.s);
 			break;
 		case CLUSTERER_CURR_DISABLED:
@@ -845,7 +879,7 @@ static struct mi_root* cluster_bcast_mi(struct mi_root *cmd, void *param)
 
 	node = cmd->node.kids;
 
-	if (node == NULL || node->next == NULL || node->next->next == NULL)
+	if (node == NULL || node->next == NULL)
 		return init_mi_tree(400, MI_SSTR(MI_MISSING_PARM));
 
 	rc = str2int(&node->value, &cluster_id);
@@ -865,7 +899,7 @@ static struct mi_root* cluster_bcast_mi(struct mi_root *cmd, void *param)
 	/* send MI cmd in cluster */
 	rc = send_mi_cmd(cluster_id, 0, cl_cmd_name, cl_cmd_params, no_params);
 	switch (rc) {
-		case CLUSTERER_SEND_SUCCES:
+		case CLUSTERER_SEND_SUCCESS:
 			LM_DBG("MI command <%.*s> sent\n", cl_cmd_name.len, cl_cmd_name.s);
 			break;
 		case CLUSTERER_CURR_DISABLED:

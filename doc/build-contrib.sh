@@ -46,6 +46,7 @@ TABLE_SIZE_ACTIVITY=${TABLE_SIZE_ACTIVITY:-10}
 declare -A author_aliases
 author_aliases=(
   ["AgalyaR <agalya.job@gmail.com>"]="Agalya Ramachandran <agalya.job@gmail.com>"
+  ["Alessio Garzi <agarzi@clouditalia.com>"]="Alessio Garzi <gun101@email.it>"
   ["Anca Vamanu"]="Anca Vamanu <anca@opensips.org>"
   ["Andreas Granig <andreas.granig@inode.info>"]="Andreas Granig <agranig@linguin.org>"
   ["Andreas Heise"]="Andreas Heise <aheise@gmx.de>"
@@ -60,6 +61,7 @@ author_aliases=(
   ["Daniel-Constantin Mierla <daniel@voice-system.ro>"]="Daniel-Constantin Mierla <miconda@gmail.com>"
   ["davesidwell <davesidwell@users.noreply.github.com>"]="Dave Sidwell <davesidwell@users.noreply.github.com>"
   ["Eric Tamme <eric@uphreak.com>"]="Eric Tamme <eric.tamme@onsip.com>"
+  ["Fabian Gast <fgast+git@only640k.net>"]="Fabian Gast <fabian.gast@nfon.com>"
   ["Henning Westerholt"]="Henning Westerholt <henning.westerholt@1und1.de>"
   ["Ionut Ionita <ionutrazvan.ionita@gmail.com>"]="Ionut Ionita <ionutionita@opensips.org>"
   ["Ionut Ionita <ionut.ionita@cti.pub.ro>"]="Ionut Ionita <ionutionita@opensips.org>"
@@ -79,6 +81,7 @@ author_aliases=(
   ["Oliver Severin Mulelid-Tynes"]="Oliver Severin Mulelid-Tynes <olivermt@users.noreply.github.com>"
   ["Parantido De Rica <Parantido@users.noreply.github.com>"]="Parantido Julius De Rica <parantido@techfusion.it>"
   ["Peter Lemenkov"]="Peter Lemenkov <lemenkov@gmail.com>"
+  ["pasandev <pasandev@ymail.com>"]="Pasan Meemaduma <pasandev@ymail.com>"
   ["Ryan Bullock"]="Ryan Bullock <rrb3942@gmail.com>"
   ["Răzvan Crainea <razvan@opensips.org>"]="Razvan Crainea <razvan@opensips.org>"
   ["Răzvan Crainea <razvan.crainea@gmail.com>"]="Razvan Crainea <razvan@opensips.org>"
@@ -110,9 +113,12 @@ author_aliases=(
 declare -A github_handles
 github_handles=(
   ["Agalya Ramachandran"]="AgalyaR"
-  ["Andrey Vorobiev <andrey.o.vorobiev@gmail.com>"]="andrey-vorobiev"
+  ["Alessio Garzi"]="Ozzyboshi"
   ["Alexandr Dubovikov <voip@start4.info>"]="adubovikov"
+  ["Alexey Vasilyev <alexei.vasilyev@gmail.com>"]="vasilevalex"
   ["Andrei Datcu <datcuandrei@gmail.com>"]="andrei-datcu"
+  ["Andrey Vorobiev <andrey.o.vorobiev@gmail.com>"]="andrey-vorobiev"
+  ["Aron Podrigal <aronp@guaranteedplus.com>"]="ar45"
   ["Bogdan-Andrei Iancu"]="bogdan-iancu"
   ["Chad Attermann"]="attermann"
   ["Christophe Sollet"]="csollet"
@@ -124,6 +130,9 @@ github_handles=(
   ["Eric Tamme"]="etamme"
   ["Eseanu Marius Cristian <eseanu.cristian@gmail.com>"]="eseanucristian"
   ["Evandro Villaron"]="evillaron"
+  ["Fabian Gast"]="fgast"
+  ["Federico Edorna <fedorna@anura.com.ar>"]="fedorna"
+  ["Gohar Ahmed <gahmed@saevolgo.ca>"]="goharahmed"
   ["Henning Westerholt"]="henningw"
   ["Ionel Cerghit"]="ionel-cerghit"
   ["Ionut Ionita"]="ionutrazvanionita"
@@ -141,14 +150,15 @@ github_handles=(
   ["Oliver Mulelid-Tynes"]="olivermt"
   ["Ovidiu Sas"]="ovidiusas"
   ["Parantido Julius De Rica"]="Parantido"
+  ["Pasan Meemaduma"]="pasanmdev"
   ["Peter Lemenkov"]="lemenkov"
   ["Razvan Crainea"]="razvancrainea"
   ["Rob Gagnon"]="rgagnon24"
   ["Robison Tesini"]="rtesini"
   ["Ryan Bullock"]="rrb3942"
   ["Saúl Ibarra Corretgé"]="saghul"
-  ["Stéphane Alnet"]="shimaore"
   ["Stefan Pologov"]="sisoftrg"
+  ["Stéphane Alnet"]="shimaore"
   ["Vlad Paiu"]="vladpaiu"
   ["Vlad Patrascu"]="rvlad-patrascu"
   ["Walter Doekes"]="wdoekes"
@@ -283,6 +293,7 @@ fix_authors=(
 
   # db_postgres
   ["9e6730ec4d2e876f6b2372f1b5fb5703112079fc"]="Ruslan Bukin"
+  ["2d80fcf1cfed82680a016fe723da03a303f73aff"]="Norman Brandinger"
 
   # db_text
   ["e8c8262d23b26bdb45b8074c6e518825ea0ca6de"]="Henning Westerholt"
@@ -670,15 +681,18 @@ count_dir_changes() {
   done
 }
 
-count_module_changes() {
+_count_module_changes() {
   [ -n "${mod_renames[$1]}" ] && count_module_changes "${mod_renames[$1]}" "rec"
 
-  mkdir -p modules/$1
-  count_dir_changes "$1"
+  mkdir -p modules/$1$2
+  count_dir_changes "$1$2"
   if [ "$2" == "rec" ]; then
     rm -r modules/$1
   fi
 }
+
+count_module_changes() { _count_module_changes "$1" ""; }
+count_module_doc_changes() { _count_module_changes "$1" "/doc"; }
 
 # $1 - module name, e.g.: "tm", "cachedb_mongodb"
 gen_module_contributors() {
@@ -867,7 +881,7 @@ unset last_commit
 declare -A first_commit
 declare -A last_commit
 
-count_module_changes $1/doc
+count_module_doc_changes $1
 
 (
   export LC_ALL=C

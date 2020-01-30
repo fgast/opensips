@@ -185,6 +185,7 @@ struct module_exports exports= {
 	MOD_TYPE_DEFAULT,               /* class of this module */
 	MODULE_VERSION,                 /* module version */
 	DEFAULT_DLFLAGS,                /* dlopen flags */
+	0,				                /* load function */
 	&deps,                          /* OpenSIPS module dependencies */
 	cmds,                           /* exported functions */
 	0,                              /* exported async functions */
@@ -194,6 +195,7 @@ struct module_exports exports= {
 	0,                              /* exported pseudo-variables */
 	0,								/* exported transformations */
 	0,                              /* extra processes */
+	0,                              /* module pre-initialization function */
 	mod_init,                       /* module initialization function */
 	(response_function) 0,          /* response handling function */
 	(destroy_function) mod_destroy, /* destroy function */
@@ -1103,7 +1105,7 @@ str* b2bl_bridge_extern(str* scenario_name, str* args[],
 
 	if(process_bridge_action(0, 0, tuple, xml_node) < 0)
 	{
-		LM_ERR("Failed to process bridge node");
+		LM_ERR("Failed to process bridge node\n");
 		goto error;
 	}
 	lock_release(&b2bl_htable[hash_index].lock);
@@ -1404,6 +1406,7 @@ static struct mi_root* mi_b2b_bridge(struct mi_root* cmd, void* param)
 
 	tuple->scenario_state = B2B_BRIDGING_STATE;
 	bridging_entity->state = 0;
+	bridging_entity->sdp_type = B2BL_SDP_LATE;
 
 	memset(&req_data, 0, sizeof(b2b_req_data_t));
 	PREP_REQ_DATA(bridging_entity);

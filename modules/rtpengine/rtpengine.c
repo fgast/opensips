@@ -472,6 +472,7 @@ struct module_exports exports = {
 	MOD_TYPE_DEFAULT,/* class of this module */
 	MODULE_VERSION,
 	DEFAULT_DLFLAGS, /* dlopen flags */
+	0,				 /* load function */
 	&deps,           /* OpenSIPS module dependencies */
 	cmds,
 	0,
@@ -481,6 +482,7 @@ struct module_exports exports = {
 	mod_pvs,     /* exported pseudo-variables */
 	0,			 /* exported transformations */
 	0,           /* extra processes */
+	0,
 	mod_init,
 	0,           /* reply processing */
 	mod_destroy, /* destroy function */
@@ -493,7 +495,7 @@ int msg_has_sdp(struct sip_msg *msg)
 	struct body_part *p;
 
 	if(parse_headers(msg, HDR_CONTENTLENGTH_F,0) < 0) {
-		LM_ERR("cannot parse cseq header");
+		LM_ERR("cannot parse cseq header\n");
 		return 0;
 	}
 
@@ -1115,7 +1117,7 @@ mod_init(void)
 
 		db_connection = db_functions.init(&db_url);
 		if(db_connection == NULL) {
-			LM_ERR("Failed to connect to database");
+			LM_ERR("Failed to connect to database\n");
 			return -1;
 		}
 
@@ -1214,7 +1216,7 @@ static int mi_child_init(void)
 
 	db_connection = db_functions.init(&db_url);
 	if(db_connection == NULL) {
-		LM_ERR("Failed to connect to database");
+		LM_ERR("Failed to connect to database\n");
 		return -1;
 	}
 
@@ -1223,12 +1225,65 @@ static int mi_child_init(void)
 	return 0;
 }
 
-static int connect_rtpengines(void)
+static inline int rtpengine_connect_node(struct rtpe_node *pnode)
 {
 	int n;
 	char *cp;
 	char *hostname;
 	struct addrinfo hints, *res;
+
+	if (pnode->rn_umode == 0) {
+		rtpe_socks[pnode->idx] = -1;
+		return 1;
+	}
+
+	hostname = (char*)pkg_malloc(strlen(pnode->rn_address) + 1);
+	if (hostname==NULL) {
+		LM_ERR("no more pkg memory\n");
+		return 0;
+	}
+	strcpy(hostname, pnode->rn_address);
+
+	cp = strrchr(hostname, ':');
+	if (cp != NULL) {
+		*cp = '\0';
+		cp++;
+	}
+	if (cp == NULL || *cp == '\0')
+		cp = CPORT;
+
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_flags = 0;
+	hints.ai_family = (pnode->rn_umode == 6) ? AF_INET6 : AF_INET;
+	hints.ai_socktype = SOCK_DGRAM;
+	if ((n = getaddrinfo(hostname, cp, &hints, &res)) != 0) {
+		LM_ERR("%s\n", gai_strerror(n));
+		pkg_free(hostname);
+		return 0;
+	}
+	pkg_free(hostname);
+
+	rtpe_socks[pnode->idx] = socket((pnode->rn_umode == 6)
+			? AF_INET6 : AF_INET, SOCK_DGRAM, 0);
+	if ( rtpe_socks[pnode->idx] == -1) {
+		LM_ERR("can't create socket\n");
+		freeaddrinfo(res);
+		return 0;
+	}
+
+	if (connect(rtpe_socks[pnode->idx], res->ai_addr, res->ai_addrlen) == -1) {
+		LM_ERR("can't connect to a RTP proxy\n");
+		close( rtpe_socks[pnode->idx] );
+		rtpe_socks[pnode->idx] = -1;
+		freeaddrinfo(res);
+		return 0;
+	}
+	freeaddrinfo(res);
+	return 1;
+}
+
+static int connect_rtpengines(void)
+{
 	struct rtpe_set  *rtpe_list;
 	struct rtpe_node *pnode;
 
@@ -1251,56 +1306,9 @@ static int connect_rtpengines(void)
 		rtpe_list = rtpe_list->rset_next){
 
 		for (pnode=rtpe_list->rn_first; pnode!=0; pnode = pnode->rn_next){
-
-			if (pnode->rn_umode == 0) {
-				rtpe_socks[pnode->idx] = -1;
-				goto rptest;
-			}
-
-			hostname = (char*)pkg_malloc(strlen(pnode->rn_address) + 1);
-			if (hostname==NULL) {
-				LM_ERR("no more pkg memory\n");
-				return -1;
-			}
-			strcpy(hostname, pnode->rn_address);
-
-			cp = strrchr(hostname, ':');
-			if (cp != NULL) {
-				*cp = '\0';
-				cp++;
-			}
-			if (cp == NULL || *cp == '\0')
-				cp = CPORT;
-
-			memset(&hints, 0, sizeof(hints));
-			hints.ai_flags = 0;
-			hints.ai_family = (pnode->rn_umode == 6) ? AF_INET6 : AF_INET;
-			hints.ai_socktype = SOCK_DGRAM;
-			if ((n = getaddrinfo(hostname, cp, &hints, &res)) != 0) {
-				LM_ERR("%s\n", gai_strerror(n));
-				pkg_free(hostname);
-				return -1;
-			}
-			pkg_free(hostname);
-
-			rtpe_socks[pnode->idx] = socket((pnode->rn_umode == 6)
-			    ? AF_INET6 : AF_INET, SOCK_DGRAM, 0);
-			if ( rtpe_socks[pnode->idx] == -1) {
-				LM_ERR("can't create socket\n");
-				freeaddrinfo(res);
-				return -1;
-			}
-
-			if (connect(rtpe_socks[pnode->idx], res->ai_addr, res->ai_addrlen) == -1) {
-				LM_ERR("can't connect to a RTP proxy\n");
-				close( rtpe_socks[pnode->idx] );
-				rtpe_socks[pnode->idx] = -1;
-				freeaddrinfo(res);
-				return -1;
-			}
-			freeaddrinfo(res);
-rptest:
-			pnode->rn_disabled = rtpe_test(pnode, 0, 1);
+			if (rtpengine_connect_node(pnode))
+				pnode->rn_disabled = rtpe_test(pnode, 0, 1);
+			/* else, there is an error, and we try to connect the next one */
 		}
 	}
 
@@ -1330,6 +1338,7 @@ static int update_rtpengines(void)
 	for (i = 0; i < rtpe_number; i++) {
 		shutdown(rtpe_socks[i], SHUT_RDWR);
 		close(rtpe_socks[i]);
+		rtpe_socks[i] = -1;
 	}
 
 	return connect_rtpengines();
@@ -1982,6 +1991,15 @@ error:
 	return 1;
 }
 
+#define RTPE_IO_ERROR_CLOSE(_fd) \
+	do { \
+		if (errno == EPIPE || errno == EBADF) { \
+			LM_INFO("Closing rtpengine socket %d\n", (_fd)); \
+			close((_fd)); \
+			(_fd) = -1; \
+		} \
+	} while (0)
+
 static char *
 send_rtpe_command(struct rtpe_node *node, bencode_item_t *dict, int *outlen)
 {
@@ -2025,7 +2043,8 @@ send_rtpe_command(struct rtpe_node *node, bencode_item_t *dict, int *outlen)
 		} while (len == -1 && errno == EINTR);
 		if (len <= 0) {
 			close(fd);
-			LM_ERR("can't send command to a RTP proxy (%s)\n",strerror(errno));
+			LM_ERR("can't send command to a RTP proxy (%d:%s)\n",
+					errno, strerror(errno));
 			goto badproxy;
 		}
 		do {
@@ -2037,32 +2056,42 @@ send_rtpe_command(struct rtpe_node *node, bencode_item_t *dict, int *outlen)
 			goto badproxy;
 		}
 	} else {
-		fds[0].fd = rtpe_socks[node->idx];
-		fds[0].events = POLLIN;
-		fds[0].revents = 0;
-		/* Drain input buffer */
-		while ((poll(fds, 1, 0) == 1) &&
-		    ((fds[0].revents & POLLIN) != 0)) {
-			if (fds[0].revents & (POLLERR|POLLNVAL|POLLHUP)) {
-				LM_WARN("error on rtpengine socket %d!\n", rtpe_socks[node->idx]);
-				break;
-			}
+		if (rtpe_socks[node->idx] != -1) {
+			fds[0].fd = rtpe_socks[node->idx];
+			fds[0].events = POLLIN;
 			fds[0].revents = 0;
-			if (recv(rtpe_socks[node->idx], buf, sizeof(buf) - 1, 0) < 0 &&
-					errno != EINTR) {
-				LM_WARN("error while draining rtpengine %d!\n", errno);
-				break;
+			/* Drain input buffer */
+			while ((poll(fds, 1, 0) == 1) &&
+				((fds[0].revents & POLLIN) != 0)) {
+				if (fds[0].revents & (POLLERR|POLLNVAL|POLLHUP)) {
+					LM_WARN("error on rtpengine socket %d!\n", rtpe_socks[node->idx]);
+					RTPE_IO_ERROR_CLOSE(rtpe_socks[node->idx]);
+					break;
+				}
+				fds[0].revents = 0;
+				if (recv(rtpe_socks[node->idx], buf, sizeof(buf) - 1, 0) < 0 &&
+						errno != EINTR) {
+					LM_WARN("error while draining rtpengine %d!\n", errno);
+					RTPE_IO_ERROR_CLOSE(rtpe_socks[node->idx]);
+					break;
+				}
 			}
 		}
 		v[0].iov_base = gencookie();
 		v[0].iov_len = strlen(v[0].iov_base);
 		for (i = 0; i < rtpengine_retr; i++) {
+			if (rtpe_socks[node->idx] == -1 && !rtpengine_connect_node(node)) {
+				LM_ERR("cannot reconnect RTP engine socket!\n");
+				goto badproxy;
+			}
 			do {
 				len = writev(rtpe_socks[node->idx], v, vcnt + 1);
 			} while (len == -1 && (errno == EINTR || errno == ENOBUFS || errno == EMSGSIZE));
 			if (len <= 0) {
-				LM_ERR("can't send command to a RTP proxy\n");
-				goto badproxy;
+				LM_ERR("can't send command to a RTP proxy (%d:%s)\n",
+						errno, strerror(errno));
+				RTPE_IO_ERROR_CLOSE(rtpe_socks[node->idx]);
+				continue;
 			}
 			while ((poll(fds, 1, rtpengine_tout * 1000) == 1) &&
 			    (fds[0].revents & POLLIN) != 0) {
@@ -2071,7 +2100,8 @@ send_rtpe_command(struct rtpe_node *node, bencode_item_t *dict, int *outlen)
 				} while (len == -1 && errno == EINTR);
 				if (len <= 0) {
 					LM_ERR("can't read reply from a RTP proxy\n");
-					goto badproxy;
+					RTPE_IO_ERROR_CLOSE(rtpe_socks[node->idx]);
+					continue;
 				}
 				if (len >= (v[0].iov_len - 1) &&
 				    memcmp(buf, v[0].iov_base, (v[0].iov_len - 1)) == 0) {
@@ -2102,6 +2132,7 @@ badproxy:
 	node->rn_recheck_ticks = get_ticks() + rtpengine_disable_tout;
 
 	return NULL;
+#undef RTPE_IO_ERROR_CLOSE
 }
 
 /*
@@ -2508,7 +2539,7 @@ static int rtpe_fetch_stats(struct sip_msg *msg, bencode_buffer_t *retbuf, benco
 	if (ctx) {
 		/* allocate stats now */
 		if (ctx->stats) {
-			if (ctx->stats->dict) /* there was a previous run and resulted in an error */
+			if (!ctx->stats->dict) /* there was a previous run and resulted in an error */
 				return -1;
 			*retbuf = ctx->stats->buf;
 			*retdict = ctx->stats->dict;
@@ -2995,7 +3026,7 @@ static int _add_rtpengine_from_database(void)
 
 	if(db_functions.query(db_connection, 0, 0, 0,colsToReturn, 0, 2, 0,
 				&result) < 0) {
-		LM_ERR("Error querying database");
+		LM_ERR("Error querying database\n");
 		if(result)
 			db_functions.free_result(db_connection, result);
 		return -1;

@@ -59,6 +59,11 @@
 #define CDB_TEST_VAL_STR "sql_cacher_cdb_test_val"
 #define INT_B64_ENC_LEN 8
 
+#define PV_VAL_BUF_NO 7
+
+#define is_str_column(pv_name_fix_p) \
+	((pv_name_fix_p)->c_entry->column_types & (1LL << (pv_name_fix_p)->col_nr))
+
 typedef struct _cache_entry {
 	str id;
 	str db_url;

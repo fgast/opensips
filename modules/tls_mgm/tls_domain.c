@@ -70,9 +70,15 @@ struct tls_domain *find_first_script_dom(struct tls_domain *dom)
 
 void tls_release_domain_aux(struct tls_domain *dom)
 {
+	int i;
+
 	dom->refs--;
 	if (dom->refs == 0) {
-		SSL_CTX_free(dom->ctx);
+		if (dom->ctx) {
+			for (i = 0; i < dom->ctx_no; i++)
+				SSL_CTX_free(dom->ctx[i]);
+			shm_free(dom->ctx);
+		}
 		lock_destroy(dom->lock);
 		lock_dealloc(dom->lock);
 		shm_free(dom);
@@ -149,7 +155,7 @@ int set_all_domain_attr(struct tls_domain **dom, char **str_vals, int *int_vals,
 
 	d = shm_realloc(d, len);
 	if (d == NULL) {
-		LM_ERR("insufficient shm memory");
+		LM_ERR("insufficient shm memory\n");
 		d = *dom;
 		*dom = (*dom)->next;
 		shm_free(d);

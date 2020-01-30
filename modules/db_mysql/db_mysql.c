@@ -37,7 +37,7 @@
 #include "dbase.h"
 #include "db_mysql.h"
 
-#include <mysql/mysql.h>
+#include <mysql.h>
 
 
 unsigned int db_mysql_timeout_interval = 2;   /* Default is 6 seconds */
@@ -80,7 +80,8 @@ struct module_exports exports = {
 	MOD_TYPE_SQLDB,  /* class of this module */
 	MODULE_VERSION,
 	DEFAULT_DLFLAGS, /* dlopen flags */
-	NULL,            /* OpenSIPS module dependencies */
+	0,               /* load function */
+	0,            /* OpenSIPS module dependencies */
 	cmds,
 	0,               /* exported async functions */
 	params,          /* module parameters */
@@ -89,6 +90,7 @@ struct module_exports exports = {
 	0,               /* exported pseudo-variables */
 	0,				 /* exported transformations */
 	0,               /* extra processes */
+	0,               /* module pre-initialization function */
 	mysql_mod_init,  /* module initialization function */
 	0,               /* response function*/
 	0,               /* destroy function */
@@ -98,7 +100,7 @@ struct module_exports exports = {
 
 static int mysql_mod_init(void)
 {
-	struct ip_addr *ip;
+	struct ip_addr *ip = NULL;
 	unsigned int port = 0;
 	str domain;
 

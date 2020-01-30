@@ -178,6 +178,7 @@ struct module_exports exports= {
 	MOD_TYPE_DEFAULT, /* class of this module */
 	MODULE_VERSION,
 	DEFAULT_DLFLAGS,		/* dlopen flags */
+	0,						/* load function */
 	NULL,				/* module dependencies */
 	cmds,			/* exported functions */
 	0,				/* exported async functions */
@@ -187,6 +188,7 @@ struct module_exports exports= {
 	0,			/* exported pseudo-variables */
 	0,			/* exported transformations */
 	0,			/* additional processes */
+	0,				/* module pre-initialization function */
 	mod_init,		/* module initialization function */
 	0,			/* reply processing function */
 	mod_destroy,
@@ -216,6 +218,7 @@ int compact_form_hdrs[]={
 	HDR_TO_T,
 	HDR_VIA_T,
 	HDR_SUPPORTED_T,
+	HDR_SESSION_EXPIRES_T,
 	HDR_OTHER_T
 };
 
@@ -311,6 +314,9 @@ void wrap_tm_func(struct cell* t, int type, struct tmcb_params* p)
 
 	t->uac[p->code].request.buffer.s = buf;
 	t->uac[p->code].request.buffer.len = olen;
+	/* we also need to compute the uri so that it points within the new buffer */
+	t->uac[p->code].uri.s = buf + t->method.len + 1;
+	/* uri.len should be the same, since it is not changed by compression */
 }
 
 int wrap_msg_compress(str* buf, struct sip_msg* p_msg) {
@@ -575,7 +581,7 @@ static int mc_compact_no_args(struct sip_msg* msg)
  * 2) Header names with compact forms will be transformed to
  * compact form
  * 3) Headers which not in whitelist will be removed
- * 4) Unnecessary sdp body codec attributes lower than 98 removed
+ * 4) Unnecessary sdp body codec attributes lower than 96 removed
  */
 static int mc_compact(struct sip_msg* msg, char* whitelist)
 {
@@ -705,6 +711,7 @@ static int mc_compact_cb(char** buf_p, void* param, int type, int* olen)
 				if (append_hf2lst(&hdr_mask[hf->type], hf,
 							&msg_total_len)) {
 					LM_ERR("Cannot append hdr to lst\n");
+					clean_hdr_field(hf);
 					pkg_free(hf);
 					goto free_mem;
 				}
@@ -766,7 +773,7 @@ static int mc_compact_cb(char** buf_p, void* param, int type, int* olen)
 				(buf_cpy++, rtpmap_len++);
 			}
 
-			if (rtpmap_val < 98) {
+			if (rtpmap_val < 96) {
 				msg_total_len += frg->end - frg->begin + 1;
 				frg->next = pkg_malloc(sizeof(body_frag_t));
 				if (!frg->next)
@@ -919,6 +926,7 @@ again:
 
 				goto again;
 			} else {
+				clean_hdr_field(hdr_mask[i]);
 				/* if it is not an OTHER_HDR or it is the last
 					one in OTHER_HDR list */
 				pkg_free(hdr_mask[i]);
@@ -941,6 +949,7 @@ again:
 
 	switch (type) {
 		case TM_CB:
+			shm_free(*buf_p);
 			*buf_p = shm_malloc(new_buf.len);
 			if (*buf_p == NULL) {
 				LM_ERR("no more sh mem\n");

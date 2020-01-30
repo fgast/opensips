@@ -554,6 +554,7 @@ struct module_exports exports = {
 	MOD_TYPE_DEFAULT,/* class of this module */
 	MODULE_VERSION,
 	DEFAULT_DLFLAGS, /* dlopen flags */
+	0,				 /* load function */
 	&deps,           /* OpenSIPS module dependencies */
 	cmds,
 	NULL,
@@ -563,6 +564,7 @@ struct module_exports exports = {
 	0,           /* exported pseudo-variables */
 	0,			 /* exported transformations */
 	procs,       /* extra processes */
+	0,
 	mod_init,
 	0,           /* reply processing */
 	mod_destroy, /* destroy function */
@@ -1289,7 +1291,7 @@ mod_init(void)
 
 		db_connection = db_functions.init(&db_url);
 		if(db_connection == NULL) {
-			LM_ERR("Failed to connect to database");
+			LM_ERR("Failed to connect to database\n");
 			return -1;
 		}
 
@@ -1430,7 +1432,7 @@ static int mi_child_init(void)
 
 	db_connection = db_functions.init(&db_url);
 	if(db_connection == NULL) {
-		LM_ERR("Failed to connect to database");
+		LM_ERR("Failed to connect to database\n");
 		return -1;
 	}
 
@@ -1460,7 +1462,7 @@ static int _add_proxies_from_database(void) {
 
 	if(db_functions.query(db_connection, 0, 0, 0,colsToReturn, 0, 2, 0,
 				&result) < 0) {
-		LM_ERR("Error querying database");
+		LM_ERR("Error querying database\n");
 		if(result)
 			db_functions.free_result(db_connection, result);
 		return -1;
@@ -2245,7 +2247,8 @@ send_rtpp_command(struct rtpp_node *node, struct iovec *v, int vcnt)
 		} while (len == -1 && errno == EINTR);
 		if (len <= 0) {
 			close(fd);
-			LM_ERR("can't send command to a RTP proxy\n");
+			LM_ERR("can't send command to a RTP proxy (%d:%s)\n",
+					errno, strerror(errno));
 			goto badproxy;
 		}
 		do {
@@ -2283,8 +2286,8 @@ send_rtpp_command(struct rtpp_node *node, struct iovec *v, int vcnt)
 				len = writev(rtpp_socks[node->idx], v, vcnt);
 			} while (len == -1 && (errno == EINTR || errno == ENOBUFS));
 			if (len <= 0) {
-				LM_ERR("can't send command to a RTP proxy %s\n",
-						strerror(errno));
+				LM_ERR("can't send command to a RTP proxy (%d:%s)\n",
+						errno, strerror(errno));
 				goto badproxy;
 			}
 			while ((poll(fds, 1, rtpproxy_tout) == 1) &&
@@ -2907,13 +2910,24 @@ static int engage_force_rtpproxy(struct dlg_cell *dlg, struct sip_msg *msg)
 		if (!offer && !has_sdp)
 			goto done;
 		/* late negotiation */
+		/* delete the value, to make sure we don't re-engage late again */
+		dlg_api.store_dlg_value(dlg, &late_name, NULL);
 	} else {
 		/* sequential request without SDP */
 		if (!has_sdp) {
+			if (msg->first_line.type == SIP_REQUEST &&
+					(method_id == METHOD_INVITE ||  method_id == METHOD_UPDATE)) {
+				/* indicate there's an ongoing late negociation happening */
+				if (dlg_api.store_dlg_value(dlg, &late_name, &late_name) < 0) {
+					LM_ERR("cannot store late_negotiation param into dialog\n");
+					goto error;
+				}
+			}
 			goto done;
 		}
 		/* if it is not an 200OK */
-		LM_DBG("handling 200 OK? - %d\n", msg->first_line.u.reply.statuscode);
+		if (msg->first_line.type == SIP_REPLY)
+			LM_DBG("handling 200 OK? - %d\n", msg->first_line.u.reply.statuscode);
 	}
 
 	/* try to move values */
@@ -2999,7 +3013,7 @@ int msg_has_sdp(struct sip_msg *msg)
 	struct body_part *p;
 
 	if(parse_headers(msg, HDR_CONTENTLENGTH_F,0) < 0) {
-		LM_ERR("cannot parse cseq header");
+		LM_ERR("cannot parse cseq header\n");
 		return 0;
 	}
 
@@ -3054,13 +3068,13 @@ engage_rtp_proxy5_f(struct sip_msg *msg,
 
 	/* to-tag field is empty*/
 	if (!( pto->tag_value.s==NULL || pto->tag_value.len==0) ) {
-		LM_ERR("function can only be called from the initial invite");
+		LM_ERR("function can only be called from the initial invite\n");
 		return -1;
 	}
 
 	/* create dialog */
 	if (dlg_api.create_dlg(msg,0) < 0) {
-		LM_ERR("error creating dialog");
+		LM_ERR("error creating dialog\n");
 		return -1;
 	}
 
@@ -3090,7 +3104,7 @@ engage_rtp_proxy5_f(struct sip_msg *msg,
 	if (msg_has_sdp(msg)) {
 		LM_DBG("message has sdp body -> forcing rtp proxy\n");
 		if(force_rtp_proxy(msg,param1,param2,param3,param4, param5,1) < 0) {
-			LM_ERR("error forcing rtp proxy");
+			LM_ERR("error forcing rtp proxy\n");
 			return -1;
 		}
 	} else {
@@ -3153,7 +3167,7 @@ engage_rtp_proxy5_f(struct sip_msg *msg,
 			val2.ri = set->id_set;
 
 			if (pv_set_value(msg, &param3_spec, EQ_T, &val2) < 0) {
-				LM_ERR("cannot store set param");
+				LM_ERR("cannot store set param\n");
 				return -1;
 			}
 		}
@@ -3887,8 +3901,10 @@ int force_rtp_proxy_body(struct sip_msg* msg, struct force_rtpp_args *args,
 					vcnt = 23;
 					STR2IOVEC(rtpp_notify_socket, v[20]);
 					if (!HAS_CAP(args->node, NOTIFY_WILD)) {
-						v[20].iov_base += 4;
-						v[20].iov_len -= 4;
+						if (!rtpp_notify_socket_un) {
+							v[20].iov_base += 4;
+							v[20].iov_len -= 4;
+						}
 					}
 				} else {
 					vcnt = (to_tag.len > 0) ? 19 : 15;

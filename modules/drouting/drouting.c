@@ -474,6 +474,7 @@ struct module_exports exports = {
 	MOD_TYPE_DEFAULT,/* class of this module */
 	MODULE_VERSION,
 	DEFAULT_DLFLAGS, /* dlopen flags */
+	0,				 /* load function */
 	&deps,           /* OpenSIPS module dependencies */
 	cmds,            /* Exported functions */
 	0,               /* Exported async functions */
@@ -483,6 +484,7 @@ struct module_exports exports = {
 	0,               /* exported pseudo-variables */
 	0,			 	 /* exported transformations */
 	0,               /* additional processes */
+	0,               /* Module pre-initialization function */
 	dr_init,         /* Module initialization function */
 	(response_function) 0,
 	(destroy_function) dr_exit,
@@ -1045,12 +1047,10 @@ dr_fix_avp_definition(_pv_spec, _avp_id, _name);
 memcpy(_name_w_part.s, _spec.s, _spec.len);\
 memcpy(_name_w_part.s + _spec.len, _p_name.s, _p_name.len);
 
-static int cleanup_head_config( struct head_config *hd) {
-	LM_DBG("Cleanup started\n");
-	if( hd==NULL ) {
-		LM_CRIT(" Cleanup head_config failed. Null pointer supplied\n");
-		return -1;
-	}
+static int cleanup_head_config( struct head_config *hd)
+{
+	if( hd==NULL )
+		return 0;
 
 	if( hd->db_url.s ) {
 		shm_free( hd->db_url.s );
@@ -1152,9 +1152,6 @@ static int cleanup_head_db( struct head_db *hd) {
 		hd->gw_attrs_avp = -1;
 		hd->rule_attrs_avp = -1;
 		hd->carrier_attrs_avp = -1;
-	} else {
-		LM_CRIT(" No head_db to clean supplied");
-		return -1;
 	}
 	return 0;
 }
@@ -1221,6 +1218,11 @@ static int dr_init(void)
 		goto error;
 	}
 
+	drd_table.len = strlen(drd_table.s);
+	drg_table.len = strlen(drg_table.s);
+	drr_table.len = strlen(drr_table.s);
+	drc_table.len = strlen(drc_table.s);
+
 	if( use_partitions == 1 ) { /* loading configurations from db */
 		if( get_config_from_db() == -1 ) {
 			LM_ERR("Failed to get configuration from db_config\n");
@@ -1246,7 +1248,6 @@ static int dr_init(void)
 		add_head_config();
 
 		/* if not empty save to head_config structure */
-		drd_table.len = strlen(drd_table.s);
 		if (drd_table.s[0]==0) {
 			LM_CRIT("mandatory parameter \"DRD_TABLE\" found empty\n");
 			goto error;
@@ -1259,7 +1260,6 @@ static int dr_init(void)
 		memcpy( head_start->drd_table.s, drd_table.s, drd_table.len );
 		head_start->drd_table.len = drd_table.len;
 
-		drr_table.len = strlen(drr_table.s);
 		if (drr_table.s[0]==0) {
 			LM_CRIT("mandatory parameter \"DRR_TABLE\" found empty\n");
 			goto error;
@@ -1272,7 +1272,6 @@ static int dr_init(void)
 		memcpy( head_start->drr_table.s, drr_table.s, drr_table.len);
 		head_start->drr_table.len = drr_table.len;
 
-		drg_table.len = strlen(drg_table.s);
 		if (drg_table.s[0]==0) {
 			LM_CRIT("mandatory parameter \"DRG_TABLE\" found empty\n");
 			goto error;
@@ -1285,7 +1284,6 @@ static int dr_init(void)
 		memcpy( head_start->drg_table.s, drg_table.s, drg_table.len);
 		head_start->drg_table.len = drg_table.len;
 
-		drc_table.len = strlen(drc_table.s);
 		if ( drc_table.s[0]==0 ) {
 			LM_CRIT("mandatory parameter \"DRC_TABLE\" found empty\n");
 			goto error;
@@ -1330,14 +1328,14 @@ static int dr_init(void)
 
 		if( shm_str_dup( &( head_db_end->db_url ),
 					&(it_head_config->db_url))!=0 ) {
-			LM_CRIT("shm_str_dup failed for db_url");
+			LM_ERR("shm_str_dup failed for db_url\n");
 			head_db_end->db_url.s = 0;
 			goto skip;
 		}
 
 		if( shm_str_dup( &( head_db_end->partition ),
 					&(it_head_config->partition))!=0 ) {
-			LM_CRIT("shm_str_dup failed for db_url");
+			LM_ERR("shm_str_dup failed for partition name\n");
 			head_db_end->db_url.s = 0;
 			goto skip;
 		}
@@ -1347,7 +1345,7 @@ static int dr_init(void)
 			head_db_end->drd_table.len = drd_table.len;
 		}else if( shm_str_dup( &( head_db_end->drd_table ),
 					&(it_head_config->drd_table))!=0 ) {
-			LM_CRIT("shm_str_dup failed for db_url");
+			LM_ERR("shm_str_dup failed for DRD table\n");
 			head_db_end->db_url.s = 0;
 			goto skip;
 		}
@@ -1357,7 +1355,7 @@ static int dr_init(void)
 			head_db_end->drr_table.len = drr_table.len;
 		}else if( shm_str_dup( &( head_db_end->drr_table ),
 					&(it_head_config->drr_table))!=0 ) {
-			LM_CRIT("shm_str_dup failed for db_url");
+			LM_ERR("shm_str_dup failed for DRR table\n");
 			head_db_end->db_url.s = 0;
 			goto skip;
 		}
@@ -1367,7 +1365,7 @@ static int dr_init(void)
 			head_db_end->drc_table.len = drc_table.len;
 		} else if( shm_str_dup( &( head_db_end->drc_table ),
 					&(it_head_config->drc_table))!=0 ) {
-			LM_CRIT("shm_str_dup failed for db_url");
+			LM_ERR("shm_str_dup failed for DRC table\n");
 			head_db_end->db_url.s = 0;
 			goto skip;
 		}
@@ -1376,7 +1374,7 @@ static int dr_init(void)
 			head_db_end->drg_table.len = drg_table.len;
 		} else if( shm_str_dup( &( head_db_end->drg_table ),
 					&(it_head_config->drg_table))!=0 ) {
-			LM_CRIT("shm_str_dup failed for db_url");
+			LM_ERR("shm_str_dup failed for DRG table\n");
 			head_db_end->db_url.s = 0;
 			goto skip;
 		}
@@ -1522,51 +1520,51 @@ static int dr_init(void)
 
 		if( (*head_db_end->db_con =
 					head_db_end->db_funcs.init(&head_db_end->db_url)) == 0) {
-			LM_ERR("failed to connect to db url %.*s", head_db_end->db_url.len,
-					head_db_end->db_url.s);
+			LM_ERR("failed to connect to db url <%.*s>\n",
+				head_db_end->db_url.len, head_db_end->db_url.s);
 			return -1;
 		}
 
 		if (!DB_CAPABILITY( head_db_end->db_funcs, DB_CAP_QUERY)) {
 			LM_CRIT( "database modules does not "
-					"provide QUERY functions needed by DRouting module\n");
+				"provide QUERY functions needed by DRouting module\n");
 			head_db_end->db_url.s = 0;
 			goto skip;
 		}
 
 		if(db_check_table_version(&head_db_end->db_funcs, *head_db_end->db_con,
 					&head_db_end->drd_table, DRD_TABLE_VER) < 0) {
-			LM_ERR("error during table version check<dr_gateways table \'%.*s\',"
-					" for partition \'%.*s\'>\n", head_db_end->drd_table.len,
-					head_db_end->drd_table.s, head_db_end->partition.len,
-					head_db_end->partition.s);
+			LM_ERR("error during table version check<dr_gateways "
+				"table \'%.*s\', for partition \'%.*s\'>\n",
+				head_db_end->drd_table.len, head_db_end->drd_table.s,
+				head_db_end->partition.len, head_db_end->partition.s);
 			return -1;
 		}
 
 		if(db_check_table_version(&head_db_end->db_funcs, *head_db_end->db_con,
 					&head_db_end->drr_table, DRR_TABLE_VER) < 0) {
 			LM_ERR("error during table version check<dr_rules table \'%.*s\',"
-					" for partition \'%.*s\'>\n", head_db_end->drr_table.len,
-					head_db_end->drr_table.s, head_db_end->partition.len,
-					head_db_end->partition.s);
+				" for partition \'%.*s\'>\n", head_db_end->drr_table.len,
+				head_db_end->drr_table.s, head_db_end->partition.len,
+				head_db_end->partition.s);
 			return -1;
 		}
 
 		if(db_check_table_version(&head_db_end->db_funcs, *head_db_end->db_con,
 					&head_db_end->drg_table, DRG_TABLE_VER) < 0) {
 			LM_ERR("error during table version check<dr_groups table \'%.*s\',"
-					" for partition \'%.*s\'>\n", head_db_end->drg_table.len,
-					head_db_end->drg_table.s, head_db_end->partition.len,
-					head_db_end->partition.s);
+				" for partition \'%.*s\'>\n", head_db_end->drg_table.len,
+				head_db_end->drg_table.s, head_db_end->partition.len,
+				head_db_end->partition.s);
 			return -1;
 		}
 
 		if(db_check_table_version(&head_db_end->db_funcs, *head_db_end->db_con,
 					&head_db_end->drc_table, DRC_TABLE_VER) < 0) {
-			LM_ERR("error during table version check<dr_carriers table \'%.*s\',"
-					" for partition \'%.*s\'>\n", head_db_end->drc_table.len,
-					head_db_end->drc_table.s, head_db_end->partition.len,
-					head_db_end->partition.s);
+			LM_ERR("error during table version check<dr_carriers "
+				"table \'%.*s\', for partition \'%.*s\'>\n",
+				head_db_end->drc_table.len, head_db_end->drc_table.s,
+				head_db_end->partition.len, head_db_end->partition.s);
 			return -1;
 		}
 
@@ -1785,11 +1783,11 @@ static int dr_child_init(int rank)
 	struct head_db *head_db_it = head_db_start;
 
 	/* We need DB connection from:
-	 *   - attendant - for shutdown, flushingmstate
+	 *   - attendant - for shutdown, flushing state
 	 *   - timer - may trigger routes with dr group
 	 *   - workers - execute routes with dr group
 	 *   - module's proc - ??? */
-	if (rank==PROC_TCP_MAIN || rank==PROC_BIN)
+	if (rank==PROC_TCP_MAIN)
 		return 0;
 
 	LM_DBG("Child initialization on rank %d \n",rank);
@@ -2077,7 +2075,7 @@ static int do_routing_0(struct sip_msg* msg)
 		pack_part_grp(&part_w_no_grp, head_db_start, 0);
 		return do_routing(msg, part_w_no_grp, (int)0, NULL);
 	} else {
-		LM_ERR("Partition name is mandatory");
+		LM_ERR("Partition name is mandatory\n");
 		return -1;
 	}
 	return -1;
@@ -2407,12 +2405,27 @@ fallback_failed:
 }
 
 
-#define DR_MAX_GWLIST	64
+#define resize_dr_sort_buffer( _buf, _old_size, _new_size, _error) \
+	do { \
+		if (_new_size > _old_size) { \
+			/* need a larger buffer */ \
+			_buf = (unsigned short*)pkg_realloc( _buf, \
+				_new_size *sizeof(unsigned short) ); \
+			if (_buf==NULL) { \
+				LM_ERR("no more pkg mem (needed  %ld)\n", \
+					_new_size*sizeof(unsigned short));\
+				_old_size = 0; \
+				goto _error;\
+			}\
+			_old_size = _new_size; \
+		} \
+	}while(0) \
 
 static int sort_rt_dst(pgw_list_t *pgwl, unsigned short size,
 		int weight, unsigned short *idx)
 {
-	unsigned short running_sum[DR_MAX_GWLIST];
+	static unsigned short *running_sum = NULL;
+	static unsigned short sum_buf_size = 0;
 	unsigned int i, first, weight_sum, rand_no;
 
 	/* populate the index array */
@@ -2423,6 +2436,7 @@ static int sort_rt_dst(pgw_list_t *pgwl, unsigned short size,
 		return 0;
 
 	while (size-first>1) {
+		resize_dr_sort_buffer( running_sum, sum_buf_size, size, err);
 		/* calculate the running sum */
 		for( i=first,weight_sum=0 ; i<size ; i++ ) {
 			weight_sum += pgwl[ idx[i] ].weight ;
@@ -2439,7 +2453,7 @@ static int sort_rt_dst(pgw_list_t *pgwl, unsigned short size,
 				if (running_sum[i]>rand_no) break;
 			if (i==size) {
 				LM_CRIT("bug in weight sort\n");
-				return -1;
+				goto err;
 			}
 		} else {
 			/* randomly select index */
@@ -2457,6 +2471,8 @@ static int sort_rt_dst(pgw_list_t *pgwl, unsigned short size,
 	}
 
 	return 0;
+err:
+	return -1;
 }
 
 
@@ -2605,8 +2621,10 @@ struct head_db * get_partition(const str *name) {
 static int do_routing(struct sip_msg* msg, dr_part_group_t * part_group,
 												int flags, gparam_t* whitelist)
 {
-	unsigned short dsts_idx[DR_MAX_GWLIST];
-	unsigned short carrier_idx[DR_MAX_GWLIST];
+	static unsigned short *dsts_idx = NULL;
+	static unsigned short dsts_idx_size = 0;
+	static unsigned short *carrier_idx = NULL;
+	static unsigned short carrier_idx_size = 0;
 	struct to_body  *from;
 	struct sip_uri  uri;
 	rt_info_t  *rt_info;
@@ -2853,6 +2871,7 @@ search_again:
 			goto error2;
 		}
 		prefix_len = 0;
+		rule_idx = 0;
 	}
 
 	if (rt_info->route_idx>0 && rt_info->route_idx<RT_NO) {
@@ -2886,6 +2905,7 @@ search_again:
 	}
 
 	/* sort the destination elements in the rule */
+	resize_dr_sort_buffer( dsts_idx, dsts_idx_size, rt_info->pgwa_len, error2);
 	i = sort_rt_dst(rt_info->pgwl, rt_info->pgwa_len,
 			flags&DR_PARAM_USE_WEIGTH, dsts_idx);
 	if (i!=0) {
@@ -2929,6 +2949,8 @@ search_again:
 				continue;
 
 			/* sort the gws of the carrier */
+			resize_dr_sort_buffer( carrier_idx, carrier_idx_size,
+				dst->dst.carrier->pgwa_len, skip);
 			j = sort_rt_dst(dst->dst.carrier->pgwl, dst->dst.carrier->pgwa_len,
 					dst->dst.carrier->flags&DR_CR_FLAG_WEIGHT, carrier_idx);
 			if (j!=0) {
@@ -2969,6 +2991,8 @@ search_again:
 				}
 
 			}
+			skip:
+			;
 
 		} else {
 
@@ -3152,7 +3176,8 @@ error1:
 static int route2_carrier(struct sip_msg* msg, char* part_carrier,
 		char* gw_att_pv, char* carr_att_pv)
 {
-	unsigned short carrier_idx[DR_MAX_GWLIST];
+	static unsigned short *carrier_idx;
+	static unsigned short carrier_idx_size;
 	struct sip_uri  uri;
 	pgw_list_t *cdst;
 	pcr_t *cr;
@@ -3250,6 +3275,8 @@ static int route2_carrier(struct sip_msg* msg, char* part_carrier,
 		goto no_gws;
 
 	/* sort the gws of the carrier */
+	resize_dr_sort_buffer( carrier_idx, carrier_idx_size,
+			cr->pgwa_len, error);
 	j = sort_rt_dst( cr->pgwl, cr->pgwa_len, cr->flags&DR_CR_FLAG_WEIGHT,
 			carrier_idx);
 	if (j!=0) {
@@ -3632,7 +3659,7 @@ static int fixup_do_routing(void** param, int param_no)
 				}
 
 				if(part_param->dr_part->type == DR_NO_PART) {
-					LM_ERR("Partition name is mandatory do_routing");
+					LM_ERR("Partition name is mandatory do_routing\n");
 				}
 			} else {
 				scnd_param = s;
@@ -3812,7 +3839,7 @@ static int fixup_is_gw( void** param, int param_no)
 			case 1:
 				part = pkg_malloc(sizeof(dr_partition_t));
 				if(part == NULL) {
-					LM_CRIT("No more pkg memory!");
+					LM_CRIT("No more pkg memory!\n");
 					return -1;
 				}
 				memset(part, 0, sizeof(dr_partition_t));
@@ -3866,7 +3893,7 @@ static int fixup_route2_carrier( void** param, int param_no)
 		case 1:
 			part_param = pkg_malloc(sizeof(dr_part_old_t));
 			if(part_param == NULL) {
-				LM_ERR("No more pkg memory!");
+				LM_ERR("No more pkg memory!\n");
 				return -1;
 			}
 			memset(part_param, 0, sizeof(dr_part_old_t));
@@ -3924,7 +3951,7 @@ static int fixup_route2_gw( void** param, int param_no)
 		case 1:
 			part_param = pkg_malloc(sizeof(dr_part_old_t));
 			if(part_param == NULL) {
-				LM_ERR("No more pkg memory!");
+				LM_ERR("No more pkg memory!\n");
 				return -1;
 			}
 			memset(part_param, 0, sizeof(dr_part_old_t));
@@ -4071,7 +4098,7 @@ static int _is_dr_gw(struct sip_msg* msg, char * part,
 
 	} else {
 		if( head_db_start == NULL ) {
-			LM_ERR("Error loading config.");
+			LM_ERR("Error loading config\n");
 			return -1;
 		}
 		return _is_dr_gw_w_part(msg, (char*)head_db_start, flags_pv, (int)type,
@@ -4107,7 +4134,7 @@ static int _is_dr_gw_w_part(struct sip_msg* msg, char * part, char* flags_pv,
 
 	if (flags_pv && flags_pv[0]) {
 		if (fixup_get_svalue( msg, (gparam_p)flags_pv, &flags_s)!=0) {
-			LM_ERR("invalid flags parameter");
+			LM_ERR("invalid flags parameter\n");
 			return -1;
 		}
 		for( i=0 ; i < flags_s.len ; i++ ) {
@@ -4325,7 +4352,8 @@ static int goes_to_gw_1(struct sip_msg* msg, char * part, char* _type, char* fla
  */
 static int goes_to_gw_0(struct sip_msg* msg)
 {
-	return goes_to_gw_1(msg, NULL, (char *)-1, NULL, NULL);
+	int type = -1;
+	return goes_to_gw_1(msg, NULL, (char *)&type, NULL, NULL);
 }
 
 
@@ -4369,14 +4397,14 @@ static struct mi_root* mi_w_partition(struct mi_node **node, struct head_db **
 		if( node!=NULL && (*node)!=NULL ) {
 			if( (*current_partition = get_partition(&((*node)->value))) == NULL) {
 				LM_ERR("Partition not found\n");
-				rpl_tree = init_mi_tree( 404, MI_SSTR("Partition not found\n"));
+				rpl_tree = init_mi_tree( 404, MI_SSTR("Partition not found"));
 				return rpl_tree;
 			}
 			*node = (*node)->next; /* advance to next param */
 			return NULL; /* everything is ok */
 		} else {
 			LM_ERR("Partition name mandatory\n");
-			rpl_tree = init_mi_tree(400, MI_SSTR("Partition mandatory\n"));
+			rpl_tree = init_mi_tree(400, MI_SSTR("Partition mandatory"));
 			return rpl_tree;
 		}
 	} else {
@@ -4384,7 +4412,7 @@ static struct mi_root* mi_w_partition(struct mi_node **node, struct head_db **
 		return NULL; /* everything is ok */
 	}
 	rpl_tree = init_mi_tree( 400,
-			MI_SSTR("Unexpected outcome while parsing param for opensisctl\n"));
+			MI_SSTR("Unexpected outcome while parsing param for opensisctl"));
 	return rpl_tree;
 }
 
@@ -4866,7 +4894,7 @@ static int get_config_from_db(void) {
 					ans_col.len = strlen(ans_col.s);
 				}
 				if( populate_head_config( head_end, ans_col, j) < 0 )
-					LM_ERR("Column from partition table not recognized; will continue");
+					LM_ERR("Column from partition table not recognized; will continue\n");
 
 			} else {
 				LM_ERR("Result from query is not a string\n");
@@ -4926,6 +4954,10 @@ static struct mi_root* mi_dr_number_routing(struct mi_root *cmd_tree, void *para
 			return init_mi_tree(400, MI_BAD_PARM_S, MI_BAD_PARM_LEN);
 		grp_id = ugrp_id;
 		node = node->next;
+	}
+
+	if (*(partition->rdata)==0) {
+		return init_mi_tree(200, MI_OK_S, MI_OK_LEN);
 	}
 
 	lock_start_read( partition->ref_lock );

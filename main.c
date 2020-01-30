@@ -90,6 +90,7 @@
 #include <grp.h>
 #include <signal.h>
 #include <time.h>
+#include <locale.h>
 
 #include <sys/ioctl.h>
 #include <net/if.h>
@@ -139,6 +140,8 @@
 #include "net/trans.h"
 
 #include "test/unit_tests.h"
+
+#include "ssl_tweaks.h"
 
 /*
  * when enabled ("-T" cmdline param), OpenSIPS startup will unfold as follows:
@@ -225,7 +228,7 @@ int tcpthreshold = 0;
 int sip_warning = 0;
 /* should localy-generated messages include server's signature? */
 int server_signature=1;
-/* Server header to be used when proxy generates request as UAS.
+/* Server header to be used when proxy generates a reply as UAS.
    Default is to use SERVER_HDR CRLF (assigned later).
 */
 str server_header = {SERVER_HDR,sizeof(SERVER_HDR)-1};
@@ -671,9 +674,9 @@ static void sig_usr(int signo)
 					/* ignored*/
 					break;
 			case SIGCHLD:
-					pid = waitpid(-1, &status, WNOHANG);
-					LM_DBG("SIGCHLD received from %ld (status=%d), ignoring\n",
-						(long)pid,status);
+					while ( (pid = waitpid(-1, &status, WNOHANG))>0 )
+						LM_DBG("SIGCHLD received from %ld (status=%d),"
+							" ignoring\n", (long)pid,status);
 					break;
 			case SIGSEGV:
 					/* looks like we ate some spicy SIP */
@@ -935,6 +938,11 @@ int main(int argc, char** argv)
 
 	init_route_lists();
 
+	/* we want to be sure that from now on, all the floating numbers are 
+	 * using the dot as separator. This is a real issue when printing the
+	 * floats for SQL ops, where the dot must be used */
+	setlocale( LC_NUMERIC, "POSIX");
+
 	/* process command line (get port no, cfg. file path etc) */
 	/* first reset getopt */
 	optind = 1;
@@ -1142,12 +1150,12 @@ try_again:
 	if (init_shm_mallocs()==-1)
 		goto error;
 
-	set_osips_state( STATE_STARTING );
-
 	if (init_stats_collector() < 0) {
 		LM_ERR("failed to initialize statistics\n");
 		goto error;
 	}
+
+	set_osips_state( STATE_STARTING );
 
 	if (!testing_framework) {
 		/* parse the config file, prior to this only default values
@@ -1294,9 +1302,14 @@ try_again:
 	LM_NOTICE("version: %s\n", version);
 
 	/* print some data about the configuration */
-	LM_INFO("using %ld Mb shared memory\n", ((shm_mem_size/1024)/1024));
-	LM_INFO("using %ld Mb private memory per process\n",
-		((pkg_mem_size/1024)/1024));
+	LM_INFO("using %ld Mb of shared memory\n", shm_mem_size/1024/1024);
+#if defined(PKG_MALLOC)
+	LM_INFO("using %ld Mb of private process memory\n", pkg_mem_size/1024/1024);
+#elif defined(USE_SHM_MEM)
+	LM_INFO("using shared memory for private process memory\n");
+#else
+	LM_INFO("using system memory for private process memory\n");
+#endif
 
 	/* init async reactor */
 	if (init_reactor_size()<0) {
@@ -1348,6 +1361,7 @@ try_again:
 		LM_ERR("failed to initialize SIP forking logic!\n");
 		goto error;
 	}
+
 
 	/* init modules */
 	if (init_modules() != 0) {

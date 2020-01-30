@@ -69,13 +69,13 @@ static int parse_domain_address(char *val, unsigned int len, struct ip_addr **ip
 
 	/* get the IP */
 	s.s = p;
-	if ((p = q_memchr(p, ':', len)) == NULL) {
+	if ((p = q_memrchr(p, ':', len)) == NULL) {
 		LM_ERR("Domain address has to be in [IP:port] format\n");
 		goto parse_err;
 	}
 	s.len = p - s.s;
 	p++;
-	if ((*ip = str2ip(&s)) == NULL) {
+	if ((*ip = str2ip(&s)) == NULL && (*ip = str2ip6(&s)) == NULL) {
 		LM_ERR("[%.*s] is not an ip\n", s.len, s.s);
 		goto parse_err;
 	}

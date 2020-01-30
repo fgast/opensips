@@ -29,10 +29,10 @@
 	<row>
 		<entry>2. </entry>
 		<entry>Bogdan-Andrei Iancu (<ulink url="https://github.com/bogdan-iancu">@bogdan-iancu</ulink>)</entry>
-		<entry align="center">26</entry>
-		<entry align="center">23</entry>
-		<entry align="center">124</entry>
-		<entry align="center">106</entry>
+		<entry align="center">29</entry>
+		<entry align="center">24</entry>
+		<entry align="center">131</entry>
+		<entry align="center">113</entry>
 	</row>
 	<row>
 		<entry>3. </entry>
@@ -52,6 +52,14 @@
 	</row>
 	<row>
 		<entry>5. </entry>
+		<entry>Liviu Chircu (<ulink url="https://github.com/liviuchircu">@liviuchircu</ulink>)</entry>
+		<entry align="center">13</entry>
+		<entry align="center">10</entry>
+		<entry align="center">70</entry>
+		<entry align="center">103</entry>
+	</row>
+	<row>
+		<entry>6. </entry>
 		<entry>Juha Heinanen (<ulink url="https://github.com/juha-h">@juha-h</ulink>)</entry>
 		<entry align="center">13</entry>
 		<entry align="center">7</entry>
@@ -59,20 +67,12 @@
 		<entry align="center">71</entry>
 	</row>
 	<row>
-		<entry>6. </entry>
-		<entry>Liviu Chircu (<ulink url="https://github.com/liviuchircu">@liviuchircu</ulink>)</entry>
-		<entry align="center">12</entry>
-		<entry align="center">9</entry>
-		<entry align="center">63</entry>
-		<entry align="center">96</entry>
-	</row>
-	<row>
 		<entry>7. </entry>
 		<entry>Razvan Crainea (<ulink url="https://github.com/razvancrainea">@razvancrainea</ulink>)</entry>
-		<entry align="center">8</entry>
-		<entry align="center">6</entry>
-		<entry align="center">15</entry>
-		<entry align="center">15</entry>
+		<entry align="center">11</entry>
+		<entry align="center">9</entry>
+		<entry align="center">18</entry>
+		<entry align="center">16</entry>
 	</row>
 	<row>
 		<entry>8. </entry>
@@ -128,23 +128,23 @@
 	<tbody>
 	<row>
 		<entry>1. </entry>
-		<entry>Bogdan-Andrei Iancu (<ulink url="https://github.com/bogdan-iancu">@bogdan-iancu</ulink>)</entry>
-		<entry align="center">Jan 2006 - Jun 2018</entry>
+		<entry>Razvan Crainea (<ulink url="https://github.com/razvancrainea">@razvancrainea</ulink>)</entry>
+		<entry align="center">Jun 2011 - Sep 2019</entry>
 	</row>
 	<row>
 		<entry>2. </entry>
 		<entry>Liviu Chircu (<ulink url="https://github.com/liviuchircu">@liviuchircu</ulink>)</entry>
-		<entry align="center">Oct 2013 - Jun 2018</entry>
+		<entry align="center">Oct 2013 - Nov 2018</entry>
 	</row>
 	<row>
 		<entry>3. </entry>
-		<entry>Vlad Patrascu (<ulink url="https://github.com/rvlad-patrascu">@rvlad-patrascu</ulink>)</entry>
-		<entry align="center">May 2017 - May 2017</entry>
+		<entry>Bogdan-Andrei Iancu (<ulink url="https://github.com/bogdan-iancu">@bogdan-iancu</ulink>)</entry>
+		<entry align="center">Jan 2006 - Nov 2018</entry>
 	</row>
 	<row>
 		<entry>4. </entry>
-		<entry>Razvan Crainea (<ulink url="https://github.com/razvancrainea">@razvancrainea</ulink>)</entry>
-		<entry align="center">Jun 2011 - Jan 2016</entry>
+		<entry>Vlad Patrascu (<ulink url="https://github.com/rvlad-patrascu">@rvlad-patrascu</ulink>)</entry>
+		<entry align="center">May 2017 - May 2017</entry>
 	</row>
 	<row>
 		<entry>5. </entry>

@@ -37,6 +37,7 @@ static void cgr_dlg_callback(struct dlg_cell *dlg, int type,
 		struct dlg_cb_params *_params);
 
 static str cgr_ctx_str = str_init("cgrX_ctx");
+static str cgr_serial_str = str_init("cgrX_serial");
 
 static inline struct cgr_acc_ctx *cgr_new_acc_ctx(struct dlg_cell *dlg)
 {
@@ -604,6 +605,10 @@ static void cgr_dlg_onwrite(struct dlg_cell *dlg, int type,
 	str buf;
 	char *p;
 
+	/* no need to dump variables for deleted, since these have already been processed */
+	if (dlg->state == DLG_STATE_DELETED)
+		return;
+
 	ctx = *_params->param;
 	LM_DBG("storing in dialog acc ctx=%p\n", ctx);
 
@@ -789,7 +794,7 @@ static void cgr_dlg_onwrite(struct dlg_cell *dlg, int type,
 		LM_BUG("length mismatch between computed and result: %d != %d\n",
 				buf.len, (int)(p - buf.s));
 
-	if (cgr_dlgb.store_dlg_value(dlg, &cgr_ctx_str, &buf) < 0)
+	if (cgr_dlgb.store_dlg_value(dlg, &cgr_serial_str, &buf) < 0)
 		LM_ERR("cannot store the serialized context value!\n");
 
 	pkg_free(buf.s);
@@ -1053,7 +1058,7 @@ void cgr_loaded_callback(struct dlg_cell *dlg, int type,
 		return;
 	}
 
-	if (cgr_dlgb.fetch_dlg_value(dlg, &cgr_ctx_str, &buf, 0) < 0) {
+	if (cgr_dlgb.fetch_dlg_value(dlg, &cgr_serial_str, &buf, 0) < 0) {
 		LM_DBG("ctx was not saved in dialog\n");
 		return;
 	}
@@ -1237,6 +1242,7 @@ static void cgr_dlg_callback(struct dlg_cell *dlg, int type,
 		LM_ERR("no parameter specified to dlg callback!\n");
 		return;
 	}
+
 	ctx = *_params->param;
 
 	/* stop every session started */

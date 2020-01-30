@@ -34,7 +34,9 @@
 #include "../../db/db_insertq.h"
 
 #define ACC_CORE_LEN 6
-#define ACC_DLG_LEN 3
+#define ACC_DURATION_LEN 2  /* duration, ms_duration */
+#define ACC_DLG_LEN 2  /* setuptime, created */
+#define ACC_CDR_LEN (ACC_DURATION_LEN + ACC_DLG_LEN)
 
 /* leading text for a request accounted from a script */
 #define ACC "ACC: "
@@ -50,24 +52,15 @@
 #define ACC_ENDED_LEN (sizeof(ACC_ENDED)-1)
 
 /* syslog attribute names */
-#define A_METHOD "method"
-#define A_METHOD_LEN (sizeof(A_METHOD)-1)
-#define A_FROMTAG "from_tag"
-#define A_FROMTAG_LEN (sizeof(A_FROMTAG)-1)
-#define A_TOTAG "to_tag"
-#define A_TOTAG_LEN (sizeof(A_TOTAG)-1)
-#define A_CALLID "call_id"
-#define A_CALLID_LEN (sizeof(A_CALLID)-1)
-#define A_CODE "code"
-#define A_CODE_LEN (sizeof(A_CODE)-1)
-#define A_STATUS "reason"
-#define A_STATUS_LEN (sizeof(A_STATUS)-1)
-#define A_DURATION "duration"
-#define A_DURATION_LEN (sizeof(A_DURATION)-1)
+#define A_METHOD    "method"
+#define A_FROMTAG   "from_tag"
+#define A_TOTAG     "to_tag"
+#define A_CALLID    "call_id"
+#define A_CODE      "code"
+#define A_STATUS    "reason"
+#define A_DURATION  "duration"
 #define A_SETUPTIME "setuptime"
-#define A_SETUPTIME_LEN (sizeof(A_SETUPTIME)-1)
-#define A_CREATED "created"
-#define A_CREATED_LEN (sizeof(A_CREATED)-1)
+#define A_CREATED   "created"
 
 #define A_SEPARATOR_CHR ';'
 #define A_EQ_CHR '='
@@ -106,16 +99,26 @@ int  acc_aaa_cdrs(struct dlg_cell *dlg, struct sip_msg *msg, acc_ctx_t* ctx);
 
 int  store_core_leg_values(struct dlg_cell *dlg, struct sip_msg *req);
 int  store_created_dlg_time(struct dlg_cell *dlg);
-int  create_acc_dlg(struct sip_msg* req);
+struct dlg_cell *create_acc_dlg(struct sip_msg* req);
 
 int  init_acc_evi(void);
-int  acc_evi_request( struct sip_msg *req, struct sip_msg *rpl, int cdr_flag);
+int  acc_evi_request( struct sip_msg *req, struct sip_msg *rpl, int cdr_flag,
+	int missed_flag);
 int  acc_evi_cdrs(struct dlg_cell *dlg, struct sip_msg *msg, acc_ctx_t* ctx);
 extern event_id_t acc_cdr_event;
 extern event_id_t acc_event;
 extern event_id_t acc_missed_event;
+extern evi_params_p acc_event_params;
+extern evi_param_p evi_params[ACC_CORE_LEN+1+MAX_ACC_EXTRA+MAX_ACC_LEG];
+extern evi_params_p acc_cdr_event_params;
+extern evi_param_p evi_cdr_params[ACC_CORE_LEN+1+ACC_CDR_LEN+
+	MAX_ACC_EXTRA+MAX_ACC_LEG];
+extern evi_params_p acc_missed_event_params;
+extern evi_param_p evi_missed_params[ACC_CORE_LEN+1+ACC_DLG_LEN+
+	MAX_ACC_EXTRA+MAX_ACC_LEG];
 
 
 int restore_dlg_extra(struct dlg_cell* dlg, acc_ctx_t** ctx);
+int restore_dlg_extra_ctx(struct dlg_cell* dlg, acc_ctx_t *ctx);
 
 #endif

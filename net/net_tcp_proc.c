@@ -94,11 +94,11 @@ void tcp_conn_release(struct tcp_connection* c, int pending_data)
 	if (c->state==S_CONN_BAD) {
 		c->lifetime=0;
 		/* CONN_ERROR will auto-dec refcnt => we must not call tcpconn_put !!*/
-		tcpconn_release(c, CONN_ERROR,1);
+		tcpconn_release(c, CONN_ERROR2,1);
 		return;
 	}
 	if (pending_data) {
-		tcpconn_release(c, ASYNC_WRITE,1);
+		tcpconn_release(c, ASYNC_WRITE2,1);
 		return;
 	}
 	tcpconn_put(c);
@@ -116,7 +116,7 @@ void tcp_conn_release(struct tcp_connection* c, int pending_data)
  *            io events are queued on the fd (the receive buffer is empty).
  *            Usefull to detect when there are no more io events queued for
  *            sigio_rt, epoll_et, kqueue.
- *         >0 on successfull read from the fd (when there might be more io
+ *         >0 on successful read from the fd (when there might be more io
  *            queued -- the receive buffer might still be non-empty)
  */
 inline static int handle_io(struct fd_map* fm, int idx,int event_type)
@@ -134,13 +134,13 @@ inline static int handle_io(struct fd_map* fm, int idx,int event_type)
 			handle_timer_job();
 			break;
 		case F_SCRIPT_ASYNC:
-			async_script_resume_f( &fm->fd, fm->data);
+			async_script_resume_f( fm->fd, fm->data);
 			break;
 		case F_FD_ASYNC:
-			async_fd_resume( &fm->fd, fm->data);
+			async_fd_resume( fm->fd, fm->data);
 			break;
 		case F_LAUNCH_ASYNC:
-			async_launch_resume( &fm->fd, fm->data);
+			async_launch_resume( fm->fd, fm->data);
 			break;
 		case F_IPC:
 			ipc_handle_job(fm->fd);
@@ -173,6 +173,16 @@ again:
 				LM_BUG("read_fd:no fd read\n");
 				/* FIXME? */
 				goto error;
+			}
+
+			if (!(con->flags & F_CONN_INIT)) {
+				if (protos[con->type].net.conn_init &&
+						protos[con->type].net.conn_init(con) < 0) {
+					LM_ERR("failed to do proto %d specific init for conn %p\n",
+							con->type, con);
+					goto con_error;
+				}
+				con->flags |= F_CONN_INIT;
 			}
 
 			LM_DBG("We have received conn %p with rw %d on fd %d\n",con,rw,s);

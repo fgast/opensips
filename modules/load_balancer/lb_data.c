@@ -561,7 +561,7 @@ int lb_route(struct sip_msg *req, int group, struct lb_res_str_list *rl,
 	if(
 		/* we should reuse previous resources list */
 		reuse ||
-		/* we have 'last_dst', i.e. previous iteration was successfull and
+		/* we have 'last_dst', i.e. previous iteration was successful and
 		 * we need to clean it up */
 		(last_dst != NULL)
 	) {
@@ -765,6 +765,7 @@ int lb_route(struct sip_msg *req, int group, struct lb_res_str_list *rl,
 							dsts_size_cur = 0;
 						} else if( it_l < load ) {
 							/* lower availability -> new iteration */
+							if( ++j == (8 * sizeof(unsigned int)) ) { i++; j=0; }
 							continue;
 						}
 
@@ -1058,7 +1059,7 @@ int lb_is_dst(struct lb_data *data, struct sip_msg *_m,
 		LM_ERR("IP PV val is not string\n");
 		return -1;
 	}
-	if ( (ip=str2ip( &val.rs ))==NULL ) {
+	if ( (ip=str2ip( &val.rs ))==NULL  && (ip=str2ip6( &val.rs ))==NULL) {
 		LM_ERR("IP val is not IP <%.*s>\n",val.rs.len,val.rs.s);
 		return -1;
 	}

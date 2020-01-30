@@ -83,6 +83,7 @@ struct module_exports exports = {
 	MOD_TYPE_DEFAULT,/* class of this module */
 	MODULE_VERSION,     /* module version */
 	DEFAULT_DLFLAGS,    /* dlopen flags */
+	0,				    /* load function */
 	NULL,            /* OpenSIPS module dependencies */
 	0,                  /* exported functions */
 	0,                  /* exported async functions */
@@ -92,6 +93,7 @@ struct module_exports exports = {
 	0,                  /* exported pseudo-variables */
 	0,					/* exported transformations */
 	mod_procs,          /* extra processes */
+	0,                  /* module pre-initialization function */
 	stun_mod_init,      /* module initialization function */
 	0,                  /* response function*/
 	0,                  /* destroy function */
@@ -319,8 +321,8 @@ int receive(int sockfd, struct receive_info *ri, str *msg, void* param)
     else if(sockfd == sockfd4)
 	sprintf(s, "%i %s %d", sockfd4, alternate_ip, port2);
     else{
-	sprintf(s, "%i unknown %s %d", sockfd, alternate_ip, port2);
-	LM_DBG("Received: on [%s] from [%s %i]; drop msg\n", s, inet_ntoa(client->sin_addr),
+	LM_DBG("Received: on [%i unknown %s %d] from [%s %i]; drop msg\n",
+		sockfd, alternate_ip, port2, inet_ntoa(client->sin_addr),
 	    ntohs(client->sin_port));
 	return -1;
     }
@@ -381,9 +383,6 @@ int receive(int sockfd, struct receive_info *ri, str *msg, void* param)
 			(struct sockaddr *) ctl.dst, ctl.srs_size) < 0)
 		LM_DBG("error sending reply %d\n", errno);
 
-
-    LM_DBG("\n\n\n");
-
 /* free */
 	if (ctl.dst && ctl.dst != client)
 		pkg_free(ctl.dst);
@@ -424,6 +423,9 @@ int getTlvAttribute(IN_OUT Buffer* buf, IN_OUT StunMsg* msg){
 
     len = ntohs(*(T16 *) b);
     b+=2;
+
+    if (len % 4 != 0)
+        len = (len/4 + 1) * 4;
 
     if(4 + len > buf->size){
 	LM_DBG("Attribute length overflows; drop msg\n");
@@ -574,6 +576,7 @@ int getTlvAttribute(IN_OUT Buffer* buf, IN_OUT StunMsg* msg){
 	    }else{
 		LM_DBG("Unknown non-mandatory attribute type = %i len = %i; "
 			"will ignore\n", type, len);
+		b += len;
 		rc = -1;
 	    }
 	    break;
@@ -1337,11 +1340,11 @@ void printStunMsg(StunMsg* msg){
     val = (T16*)msg->id;
 
     if(0x1234 == ntohs(0x3412)){
-	LM_DBG("\tID = %04hX%04hX%04hX%04hX%04hX%04hX%04hX%04hX\n\n",
+	LM_DBG("\tID = %04hX%04hX%04hX%04hX%04hX%04hX%04hX%04hX\n",
 	    ntohs(val[0]),ntohs(val[1]),ntohs(val[2]),ntohs(val[3]),
 	    ntohs(val[4]),ntohs(val[5]),ntohs(val[6]),ntohs(val[7]));
     }else{
-	LM_DBG("\tID = %04hX%04hX%04hX%04hX%04hX%04hX%04hX%04hX\n\n",
+	LM_DBG("\tID = %04hX%04hX%04hX%04hX%04hX%04hX%04hX%04hX\n",
 	    val[0],val[1],val[2],val[3],
 	    val[4],val[5],val[6],val[7]);
     }

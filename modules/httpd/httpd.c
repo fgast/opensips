@@ -95,6 +95,7 @@ struct module_exports exports = {
 	MOD_TYPE_DEFAULT,/* class of this module */
 	MODULE_VERSION,
 	DEFAULT_DLFLAGS,            /* dlopen flags */
+	0,				            /* load function */
 	NULL,            /* OpenSIPS module dependencies */
 	cmds,                       /* exported functions */
 	0,                          /* exported async functions */
@@ -104,6 +105,7 @@ struct module_exports exports = {
 	NULL,                       /* exported PV */
 	NULL,						/* exported transformations */
 	mi_procs,                   /* extra processes */
+	0,                          /* module pre-initialization function */
 	mod_init,                   /* module initialization function */
 	(response_function) NULL,   /* response handling function */
 	(destroy_function) destroy, /* destroy function */
@@ -155,6 +157,7 @@ int destroy(void)
 int httpd_register_httpdcb(const char *module, str *http_root,
 			httpd_acces_handler_cb f1,
 			httpd_flush_data_cb f2,
+			enum HTTPD_CONTENT_TYPE type,
 			httpd_init_proc_cb f3)
 {
 	int i;
@@ -193,6 +196,7 @@ int httpd_register_httpdcb(const char *module, str *http_root,
 	}
 
 	cb->module = module;
+	cb->type = type;
 	cb->http_root = http_root;
 	cb->callback = f1;
 	cb->flush_data_callback = f2;

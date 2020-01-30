@@ -498,7 +498,7 @@ static int _reply( struct cell *trans, struct sip_msg* p_msg,
 	if (code>=180 && p_msg->to
 				&& (get_to(p_msg)->tag_value.s==0
 			    || get_to(p_msg)->tag_value.len==0)) {
-		calc_crc_suffix( p_msg, tm_tag_suffix );
+		calc_tag_suffix( p_msg, tm_tag_suffix );
 		buf = build_res_buf_from_sip_req(code,text, &tm_tag, p_msg, &len, &bm);
 		return _reply_light( trans, buf, len, code,
 			tm_tag.s, TOTAG_VALUE_LEN, lock, &bm);
@@ -673,13 +673,13 @@ static inline int do_dns_failover(struct cell *t)
 		if (t->uas.request==NULL) {
 			LM_ERR("cloning failed\n");
 			free_sip_msg(req);
+			pkg_free(req);
 			return -1;
 		}
 		t->uas.end_request = ((char*)t->uas.request) + sip_msg_len;
 		/* free the actual SIP message, keep the clone only */
 		free_sip_msg(req);
-		/* the sip_msg structure is static in buf_to_sip_msg,
-		   so no need to free it */
+		pkg_free(req);
 	}
 	shmem_msg = t->uas.request;
 
@@ -1092,13 +1092,12 @@ error:
 }
 
 
-
-
 int t_reply( struct cell *t, struct sip_msg* p_msg, unsigned int code,
 	str * text )
 {
 	return _reply( t, p_msg, code, text, 1 /* lock replies */ );
 }
+
 
 int t_reply_unsafe( struct cell *t, struct sip_msg* p_msg, unsigned int code,
 	str * text )
@@ -1107,7 +1106,13 @@ int t_reply_unsafe( struct cell *t, struct sip_msg* p_msg, unsigned int code,
 }
 
 
+int t_gen_totag(struct sip_msg *msg, str *totag)
+{
+	calc_tag_suffix( msg, tm_tag_suffix );
+	*totag = tm_tag;
 
+	return 1;
+}
 
 
 void set_final_timer( /* struct s_table *h_table, */ struct cell *t )
@@ -1235,7 +1240,7 @@ enum rps relay_reply( struct cell *t, struct sip_msg *p_msg, int branch,
 			if (relayed_code>=180 && t->uas.request->to
 					&& (get_to(t->uas.request)->tag_value.s==0
 					|| get_to(t->uas.request)->tag_value.len==0)) {
-				calc_crc_suffix( t->uas.request, tm_tag_suffix );
+				calc_tag_suffix( t->uas.request, tm_tag_suffix );
 				buf = build_res_buf_from_sip_req(
 						relayed_code,
 						&text,
@@ -1703,6 +1708,8 @@ int w_t_reply_body(struct sip_msg* msg, str* code, str *text,
 			return -1;
 		}
 		t=get_t();
+	} else {
+		update_cloned_msg_from_msg( t->uas.request, msg);
 	}
 	return t_reply_with_body(t, code_i, &code_s, &body_s, 0, 0);
 }
@@ -1751,7 +1758,7 @@ int t_reply_with_body( struct cell *trans, unsigned int code, str *text,
 	else
 	if (code>=180 && p_msg->to && (get_to(p_msg)->tag_value.s==0
 			|| get_to(p_msg)->tag_value.len==0)) {
-		calc_crc_suffix( p_msg, tm_tag_suffix );
+		calc_tag_suffix( p_msg, tm_tag_suffix );
 		rpl.s = build_res_buf_from_sip_req(code,text, &tm_tag, p_msg,
 				(unsigned int*)&rpl.len, &bm);
 		to_tag_rpl.s = tm_tag.s;

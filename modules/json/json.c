@@ -134,6 +134,7 @@ struct module_exports exports= {
 	MOD_TYPE_DEFAULT,/* class of this module */
 	MODULE_VERSION,
 	DEFAULT_DLFLAGS, /* dlopen flags */
+	0,				 /* load function */
 	NULL,            /* OpenSIPS module dependencies */
 	cmds,            /* exported functions */
 	0,               /* exported async functions */
@@ -143,6 +144,7 @@ struct module_exports exports= {
 	mod_items,       /* exported pseudo-variables */
 	0,			 	 /* exported transformations */
 	0,               /* extra processes */
+	0,               /* module pre-initialization function */
 	mod_init,        /* module initialization function */
 	0,               /* reply processing function */
 	mod_destroy,
@@ -211,7 +213,7 @@ int fixup_json_bind(void** param, int param_no)
 			return -1;
 		}
 
-		if( var->type != PVT_JSON )
+		if(pv_type(var->type) != PVT_JSON)
 		{
 			LM_ERR("Parameter no: %d must be a json variable\n",param_no);
 			return -1;
@@ -780,7 +782,7 @@ int get_value(int state, json_name * id, char *start, char * cur)
 			{
 				if(!pv_parse_spec(&in, &node->var))
 				{
-					LM_ERR("Unable to parse variable ");
+					LM_ERR("Unable to parse variable\n");
 					return -1;
 				}
 
@@ -827,7 +829,7 @@ int get_value(int state, json_name * id, char *start, char * cur)
 			{
 				if(!pv_parse_spec(&in, &node->var))
 				{
-					LM_ERR("Unable to parse variable ");
+					LM_ERR("Unable to parse variable\n");
 					return -1;
 				}
 

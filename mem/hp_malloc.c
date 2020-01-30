@@ -568,7 +568,10 @@ int hp_mem_warming(struct hp_block *hpb)
 		sf = sf->next;
 	}
 
+	/* the big frag is typically next-to-last */
 	big_frag = hpb->first_frag;
+	while (FRAG_NEXT(big_frag) != hpb->last_frag)
+		big_frag = FRAG_NEXT(big_frag);
 
 	/* populate each free hash bucket with proper number of fragments */
 	for (sf = sorted_sf; sf; sf = sf->next) {
@@ -1079,11 +1082,12 @@ void hp_pkg_free(struct hp_block *hpb, void *p)
 	struct hp_frag *f, *next;
 
 	if (!p) {
-		LM_WARN("free(0) called\n");
+		LM_GEN1(memlog, "free(0) called\n");
 		return;
 	}
 
 	f = FRAG_OF(p);
+	check_double_free(p, f, hpb);
 
 	/*
 	 * for private memory, coalesce as many consecutive fragments as possible
@@ -1135,11 +1139,12 @@ void hp_shm_free_unsafe(struct hp_block *hpb, void *p)
 	struct hp_frag *f;
 
 	if (!p) {
-		LM_WARN("free(0) called\n");
+		LM_GEN1(memlog, "free(0) called\n");
 		return;
 	}
 
 	f = FRAG_OF(p);
+	check_double_free(p, f, hpb);
 
 	hp_frag_attach(hpb, f);
 	update_stats_shm_frag_attach(f);
@@ -1161,11 +1166,12 @@ void hp_shm_free(struct hp_block *hpb, void *p)
 	unsigned int hash;
 
 	if (!p) {
-		LM_WARN("free(0) called\n");
+		LM_GEN1(memlog, "free(0) called\n");
 		return;
 	}
 
 	f = FRAG_OF(p);
+	check_double_free(p, f, hpb);
 
 	hash = PEEK_HASH_RR(hpb, f->size);
 

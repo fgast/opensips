@@ -291,6 +291,7 @@ struct module_exports exports= {
 	MOD_TYPE_DEFAULT,/* class of this module */
 	MODULE_VERSION,
 	DEFAULT_DLFLAGS, /* dlopen flags */
+	0,				 /* load function */
 	NULL,            /* OpenSIPS module dependencies */
 	cmds,       /* exported functions */
 	0,          /* exported async functions */
@@ -300,6 +301,7 @@ struct module_exports exports= {
 	0,          /* exported pseudo-variables */
 	0,			/* exported transformations */
 	0,          /* extra processes */
+	0,          /* module pre-initialization function */
 	mod_init,   /* module initialization function */
 	0,          /* response function */
 	0,          /* destroy function */
@@ -463,7 +465,7 @@ static int remove_hf_match_f(struct sip_msg* msg, char* pattern, char* regex_or_
 				continue;
 			}
 		} else {
-			LM_ERR("Unknown match type. Supported types are r (regex) and g (glob)");
+			LM_ERR("Unknown match type. Supported types are r (regex) and g (glob)\n");
 			return -1;
 		}
 		*(hf->name.s+hf->name.len) = tmp;
@@ -1594,7 +1596,7 @@ static int check_hostname(str *domain)
 	}
 
 	/* always starts with a ALPHANUM */
-	if (!IS_ALPHANUM(domain->s[0])) {
+	if (!IS_ALPHANUM(domain->s[0]) && (domain->s[0] != '[')) {
 		LM_DBG("invalid starting character in domain: %c[%d]\n", domain->s[0], domain->s[0]);
 		return -1;
 	}
@@ -1603,7 +1605,7 @@ static int check_hostname(str *domain)
 	end = domain->s + domain->len - 1;
 
 	for (p = domain->s + 1; p < end; p++) {
-		if (!IS_ALPHANUM(*p) && (*p != '-')) {
+		if (!IS_ALPHANUM(*p) && (*p != '-') && (*p != ':')) {
 			if (*p != '.') {
 				LM_DBG("invalid character in hostname: %c[%d]\n", *p, *p);
 				return -1;
@@ -1615,7 +1617,7 @@ static int check_hostname(str *domain)
 	}
 
 	/* check if the last character is a '-' */
-	if (!IS_ALPHANUM(*end) && (*end != '.')) {
+	if (!IS_ALPHANUM(*end) && (*end != '.') && (*end != ']')) {
 		LM_DBG("invalid character at the end of the domain: %c[%d]\n", *end, *end);
 		return -1;
 	}

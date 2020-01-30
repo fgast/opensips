@@ -86,53 +86,112 @@ char* print_cseq_mini(char* target, str* cseq, str* method);
 static inline struct sip_msg* buf_to_sip_msg(char *buf, unsigned int len,
 															dlg_t *dialog)
 {
-	static struct sip_msg req;
+	struct sip_msg *req;
 
-	memset( &req, 0, sizeof(req) );
-	req.id = get_next_msg_no();
-	req.buf = buf;
-	req.len = len;
-	if (parse_msg(buf, len, &req)!=0) {
-		LM_CRIT("BUG - buffer parsing failed!");
+	req = (struct sip_msg*)pkg_malloc( sizeof(struct sip_msg));
+	if (req==NULL) {
+		LM_ERR("no more pkg mem, needed %lu\n",sizeof(struct sip_msg));
 		return NULL;
+	}
+	memset( req, 0, sizeof(struct sip_msg) );
+	req->id = get_next_msg_no();
+	req->buf = buf;
+	req->len = len;
+	if (parse_msg(buf, len, req)!=0) {
+		LM_CRIT("BUG - buffer parsing failed!\n");
+		goto error;
 	}
 	/* parse all headers, to be sure they get cloned in shm */
-	if (parse_headers(&req, HDR_EOH_F, 0 )<0) {
+	if (parse_headers(req, HDR_EOH_F, 0 )<0) {
 		LM_ERR("parse_headers failed\n");
-		free_sip_msg(&req);
-		return NULL;
+		goto error1;
 	}
 	/* check if we have all necessary headers */
-	if (check_transaction_quadruple(&req)==0) {
+	if (check_transaction_quadruple(req)==0) {
 		LM_ERR("too few headers\n");
-		free_sip_msg(&req);
 		/* stop processing */
-		return NULL;
+		goto error1;
 	}
 
 	/* populate some special fields in sip_msg */
-	req.force_send_socket = dialog->send_sock;
-	if (set_dst_uri(&req, dialog->hooks.next_hop)) {
+	req->force_send_socket = dialog->send_sock;
+	if (set_dst_uri(req, dialog->hooks.next_hop)) {
 		LM_ERR("failed to set dst_uri\n");
-		free_sip_msg(&req);
-		return NULL;
+		goto error1;
 	}
-	req.rcv.proto = dialog->send_sock->proto;
-	req.rcv.src_ip = req.rcv.dst_ip = dialog->send_sock->address;
-	req.rcv.src_port = req.rcv.dst_port = dialog->send_sock->port_no;
-	req.rcv.bind_address = dialog->send_sock;
+	req->rcv.proto = dialog->send_sock->proto;
+	req->rcv.src_ip = req->rcv.dst_ip = dialog->send_sock->address;
+	req->rcv.src_port = req->rcv.dst_port = dialog->send_sock->port_no;
+	req->rcv.bind_address = dialog->send_sock;
 
-	return &req;
+	return req;
+
+error1:
+	free_sip_msg(req);
+error:
+	pkg_free(req);
+	return NULL;
 }
 
-
-static inline int fake_req(struct sip_msg *faked_req, struct sip_msg *shm_msg,
-		struct ua_server *uas, struct ua_client *uac, int with_dst)
+static inline int fix_fake_req_headers(struct sip_msg *req)
 {
 	struct hdr_field *hdr;
 	struct lump *ld, *la;
 	contact_t *c;
 
+	if (clone_headers(req, req) < 0) {
+		LM_ERR("could not clone headers list!\n");
+		return -1;
+	}
+	/*
+	 * the fix_nated_contact() function in the nathelper module changes the
+	 * contact to point to a buffer stored in a lump; the following code
+	 * restores the pointer so that functions that use the contact header body
+	 * to see the "fixed" contact, rather than the original header
+	 */
+	for (hdr = req->contact; hdr; hdr = hdr->sibling) {
+
+		/* not something critical right now, so we can pass the error */
+		if (parse_contact(hdr) < 0 || !hdr->parsed)
+			continue;
+
+		for (c = ((contact_body_t *)hdr->parsed)->contacts; c; c = c->next) {
+			/* search for the lump */
+			for (ld = req->add_rm; ld; ld = ld->next) {
+				if (ld->op != LUMP_DEL)
+					continue;
+				for (la = ld->after; la; la = la->after) {
+					/* LM_DBG("matching contact lump op=%d type=%d offset=%d"
+							"len = %d c.offset=%d c.len=%d\n", la->op,
+							la->type, ld->u.offset, ld->len,
+							(int)(c->uri.s-req->buf), c->uri.len); */
+					if (la->op == LUMP_ADD && la->type == HDR_CONTACT_T &&
+							ld->u.offset == c->uri.s-req->buf &&
+							ld->len == c->uri.len) {
+						/* if enclosed, skip enclosing */
+						if (la->u.value[0] == '<') {
+							c->uri.s = la->u.value + 1;
+							c->uri.len = la->len - 2;
+						} else {
+							c->uri.s = la->u.value;
+							c->uri.len = la->len;
+						}
+						LM_DBG("buffer found <%.*s>\n", c->uri.len, c->uri.s);
+						goto next_contact;
+					}
+				}
+			}
+next_contact:
+			;
+		}
+	}
+	return 0;
+}
+
+
+static inline int fake_req(struct sip_msg *faked_req, struct sip_msg *shm_msg,
+		struct ua_server *uas, struct ua_client *uac, int inherit_br_data)
+{
 	/* on_negative_reply faked msg now copied from shmem msg (as opposed
 	 * to zero-ing) -- more "read-only" actions (exec in particular) will
 	 * work from reply_route as they will see msg->from, etc.; caution,
@@ -165,99 +224,98 @@ static inline int fake_req(struct sip_msg *faked_req, struct sip_msg *shm_msg,
 	}
 	faked_req->parsed_uri_ok = 0;
 
-	/* duplicate the dst_uri, advertised address and port into private mem
-	 * so that they can be changed at script level */
-	if (with_dst) {
-		if (shm_msg->dst_uri.s) {
-			faked_req->dst_uri.s = pkg_malloc(shm_msg->dst_uri.len);
+	if (inherit_br_data) {
+
+		/* duplicate the dst_uri and path_vec into private mem
+		 * so that they can be visible and changed at script level */
+		if (uac->duri.s) {
+			faked_req->dst_uri.s = pkg_malloc(uac->duri.len);
 			if (!faked_req->dst_uri.s) {
 				LM_ERR("out of pkg mem\n");
 				goto out;
 			}
-			memcpy(faked_req->dst_uri.s, shm_msg->dst_uri.s,
-				shm_msg->dst_uri.len);
+			memcpy(faked_req->dst_uri.s, uac->duri.s, uac->duri.len);
 		}
+		if (uac->path_vec.s) {
+			faked_req->path_vec.s = pkg_malloc(uac->path_vec.len);
+			if (!faked_req->path_vec.s) {
+				LM_ERR("out of pkg mem\n");
+				goto out2;
+			}
+			memcpy(faked_req->path_vec.s, uac->path_vec.s, uac->path_vec.len);
+		}
+
+		/* duplicate advertised address and port from UAC into
+		 * private mem so that they can be changed at script level */
+		if (uac->adv_address.s) {
+			faked_req->set_global_address.s = pkg_malloc(uac->adv_address.len);
+			if (!faked_req->set_global_address.s) {
+				LM_ERR("out of pkg mem\n");
+				goto out;
+			}
+			memcpy(faked_req->set_global_address.s,
+				uac->adv_address.s, uac->adv_address.len);
+		} else {
+			faked_req->set_global_address.s = NULL;
+			faked_req->set_global_address.len = 0;
+		}
+		if (uac->adv_port.s) {
+			faked_req->set_global_port.s=pkg_malloc(uac->adv_port.len);
+			if (!faked_req->set_global_port.s) {
+				LM_ERR("out of pkg mem\n");
+				goto out1;
+			}
+			memcpy(faked_req->set_global_port.s,
+				uac->adv_port.s, uac->adv_port.len);
+		} else {
+			faked_req->set_global_port.s = NULL;
+			faked_req->set_global_port.len = 0;
+		}
+
+		/* Q value was already copied as part of the sip_msg struct */
 	} else {
+
+		/* reset DST URI, PATH vector and Q value */
 		faked_req->dst_uri.s = NULL;
 		faked_req->dst_uri.len = 0;
-	}
+		faked_req->path_vec.s = NULL;
+		faked_req->path_vec.len = 0;
+		faked_req->ruri_q = Q_UNSPECIFIED;
 
-	if (shm_msg->set_global_address.s) {
-		faked_req->set_global_address.s = pkg_malloc
-			(shm_msg->set_global_address.len);
-		if (!faked_req->set_global_address.s) {
-			LM_ERR("out of pkg mem\n");
-			goto out;
-		}
-		memcpy(faked_req->set_global_address.s, shm_msg->set_global_address.s,
-			shm_msg->set_global_address.len);
-	}
-
-	if (shm_msg->set_global_port.s) {
-		faked_req->set_global_port.s=pkg_malloc(shm_msg->set_global_port.len);
-		if (!faked_req->set_global_port.s) {
-			LM_ERR("out of pkg mem\n");
-			goto out1;
-		}
-		memcpy(faked_req->set_global_port.s, shm_msg->set_global_port.s,
-			shm_msg->set_global_port.len);
-	}
-
-	if (shm_msg->path_vec.s) {
-		faked_req->path_vec.s = pkg_malloc(shm_msg->path_vec.len);
-		if (!faked_req->path_vec.s) {
-			LM_ERR("out of pkg mem\n");
-			goto out2;
-		}
-		memcpy(faked_req->path_vec.s, shm_msg->path_vec.s,
-			   shm_msg->path_vec.len);
-	}
-
-	/*
-	 * the fix_nated_contact() function in the nathelper module changes the
-	 * contact to point to a buffer stored in a lump; the following code
-	 * restores the pointer so that functions that use the contact header body
-	 * to see the "fixed" contact, rather than the original header
-	 */
-	for (hdr = shm_msg->contact; hdr; hdr = hdr->sibling) {
-		/* not something critical right now, so we can pass the error */
-		if (parse_contact(hdr) < 0 || !hdr->parsed)
-			continue;
-
-		for (c = ((contact_body_t *)hdr->parsed)->contacts; c; c = c->next) {
-			/* search for the lump */
-			for (ld = shm_msg->add_rm; ld; ld = ld->next) {
-				if (ld->op != LUMP_DEL)
-					continue;
-				for (la = ld->after; la; la = la->after) {
-					/* LM_DBG("matching contact lump op=%d type=%d offset=%d"
-							"len = %d c.offset=%d c.len=%d\n", la->op,
-							la->type, ld->u.offset, ld->len,
-							(int)(c->uri.s-shm_msg->buf), c->uri.len); */
-					if (la->op == LUMP_ADD && la->type == HDR_CONTACT_T &&
-							ld->u.offset == c->uri.s-shm_msg->buf &&
-							ld->len == c->uri.len) {
-						/* if enclosed, skip enclosing */
-						if (la->u.value[0] == '<') {
-							c->uri.s = la->u.value + 1;
-							c->uri.len = la->len - 2;
-						} else {
-							c->uri.s = la->u.value;
-							c->uri.len = la->len;
-						}
-						LM_DBG("buffer found <%.*s>\n", c->uri.len, c->uri.s);
-						goto next_contact;
-					}
-				}
+		/* duplicate advertised address and port from SIP MSG into
+		 * private mem so that they can be changed at script level */
+		if (shm_msg->set_global_address.s) {
+			faked_req->set_global_address.s = pkg_malloc
+				(shm_msg->set_global_address.len);
+			if (!faked_req->set_global_address.s) {
+				LM_ERR("out of pkg mem\n");
+				goto out;
 			}
-next_contact:
-			;
+			memcpy(faked_req->set_global_address.s,
+				shm_msg->set_global_address.s,
+				shm_msg->set_global_address.len);
 		}
+		if (shm_msg->set_global_port.s) {
+			faked_req->set_global_port.s=pkg_malloc
+				(shm_msg->set_global_port.len);
+			if (!faked_req->set_global_port.s) {
+				LM_ERR("out of pkg mem\n");
+				goto out1;
+			}
+			memcpy(faked_req->set_global_port.s, shm_msg->set_global_port.s,
+				shm_msg->set_global_port.len);
+		}
+
+	}
+
+	if (fix_fake_req_headers(faked_req) < 0) {
+		LM_ERR("could not fix haed request headers!\n");
+		goto out3;
 	}
 
 	if (clone_sip_msg_body( shm_msg, faked_req, &faked_req->body, 0)!=0) {
 		LM_ERR("out of pkg mem - cannot clone body\n");
-		goto out3;
+		goto out4;
 	}
 
 	/* set as flags the global flags and the branch flags from the
@@ -267,6 +325,8 @@ next_contact:
 		setb0flags( faked_req, uac->br_flags);
 
 	return 1;
+out4:
+	pkg_free(faked_req->headers);
 out3:
 	pkg_free(faked_req->path_vec.s);
 out2:
@@ -328,6 +388,12 @@ inline static void free_faked_req(struct sip_msg *faked_req, struct cell *t)
 		shm_free(faked_req->reply_lump);
 
 	clean_msg_clone( faked_req, t->uas.request, t->uas.end_request);
+
+	/* remove the headers' list */
+	if (faked_req->headers) {
+		pkg_free(faked_req->headers);
+		faked_req->headers = 0;
+	}
 }
 
 

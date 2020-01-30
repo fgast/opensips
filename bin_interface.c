@@ -34,12 +34,6 @@ struct socket_info *bin;
 
 static struct packet_cb_list *reg_cbs;
 
-
-short get_bin_pkg_version(bin_packet_t *packet)
-{
-	return  *(short *)(packet->buffer.s + BIN_PACKET_MARKER_SIZE + PKG_LEN_FIELD_SIZE);
-}
-
 void set_len(bin_packet_t *packet) {
 	*(unsigned int *)(packet->buffer.s + BIN_PACKET_MARKER_SIZE) = packet->buffer.len;
 }
@@ -125,7 +119,7 @@ void bin_init_buffer(bin_packet_t *packet, char *buffer, int length)
 
 	packet->type = *(int *)(capability.s + capability.len);
 	packet->front_pointer = capability.s + capability.len + CMD_FIELD_SIZE;
-	LM_INFO("init buffer length %d\n", length);
+	LM_DBG("init buffer length %d\n", length);
 }
 
 /*
@@ -384,11 +378,11 @@ int bin_pop_back_int(bin_packet_t *packet, void *info)
  * @return:   0 on success
  */
 int bin_register_cb(str *cap, void (*cb)(bin_packet_t *, int,
-                    struct receive_info *, void * atr), void *att)
+		struct receive_info *, void * atr), void *att, int att_len)
 {
 	struct packet_cb_list *new_cb;
 
-	new_cb = pkg_malloc(sizeof(*new_cb));
+	new_cb = pkg_malloc(sizeof(*new_cb) + att_len);
 	if (!new_cb) {
 		LM_ERR("No more pkg mem!\n");
 		return -1;
@@ -398,7 +392,10 @@ int bin_register_cb(str *cap, void (*cb)(bin_packet_t *, int,
 	new_cb->cbf = cb;
 	new_cb->capability.len = cap->len;
 	new_cb->capability.s = cap->s;
-	new_cb->att = att;
+	if (att) {
+		new_cb->att = (void *)(new_cb + 1);
+		memcpy(new_cb->att, att, att_len);
+	}
 
 	new_cb->next = reg_cbs;
 	reg_cbs = new_cb;

@@ -29,25 +29,25 @@
 	<row>
 		<entry>2. </entry>
 		<entry>Razvan Crainea (<ulink url="https://github.com/razvancrainea">@razvancrainea</ulink>)</entry>
-		<entry align="center">12</entry>
-		<entry align="center">10</entry>
-		<entry align="center">54</entry>
-		<entry align="center">36</entry>
+		<entry align="center">19</entry>
+		<entry align="center">17</entry>
+		<entry align="center">65</entry>
+		<entry align="center">39</entry>
 	</row>
 	<row>
 		<entry>3. </entry>
 		<entry>Liviu Chircu (<ulink url="https://github.com/liviuchircu">@liviuchircu</ulink>)</entry>
-		<entry align="center">5</entry>
-		<entry align="center">3</entry>
-		<entry align="center">12</entry>
-		<entry align="center">28</entry>
+		<entry align="center">6</entry>
+		<entry align="center">4</entry>
+		<entry align="center">15</entry>
+		<entry align="center">31</entry>
 	</row>
 	<row>
 		<entry>4. </entry>
 		<entry>Bogdan-Andrei Iancu (<ulink url="https://github.com/bogdan-iancu">@bogdan-iancu</ulink>)</entry>
-		<entry align="center">4</entry>
-		<entry align="center">2</entry>
-		<entry align="center">2</entry>
+		<entry align="center">5</entry>
+		<entry align="center">3</entry>
+		<entry align="center">3</entry>
 		<entry align="center">1</entry>
 	</row>
 	<row>
@@ -96,18 +96,18 @@
 	<tbody>
 	<row>
 		<entry>1. </entry>
-		<entry>Bogdan-Andrei Iancu (<ulink url="https://github.com/bogdan-iancu">@bogdan-iancu</ulink>)</entry>
-		<entry align="center">Dec 2014 - Jun 2018</entry>
+		<entry>Razvan Crainea (<ulink url="https://github.com/razvancrainea">@razvancrainea</ulink>)</entry>
+		<entry align="center">Dec 2014 - Sep 2019</entry>
 	</row>
 	<row>
 		<entry>2. </entry>
 		<entry>Liviu Chircu (<ulink url="https://github.com/liviuchircu">@liviuchircu</ulink>)</entry>
-		<entry align="center">Apr 2018 - Jun 2018</entry>
+		<entry align="center">Apr 2018 - Aug 2019</entry>
 	</row>
 	<row>
 		<entry>3. </entry>
-		<entry>Razvan Crainea (<ulink url="https://github.com/razvancrainea">@razvancrainea</ulink>)</entry>
-		<entry align="center">Dec 2014 - Feb 2018</entry>
+		<entry>Bogdan-Andrei Iancu (<ulink url="https://github.com/bogdan-iancu">@bogdan-iancu</ulink>)</entry>
+		<entry align="center">Dec 2014 - Mar 2019</entry>
 	</row>
 	<row>
 		<entry>4. </entry>
@@ -138,7 +138,7 @@
 	<title>Documentation</title>
 <section id="documentation_contributors" xreflabel="documentation_contributors">
 	<title>Contributors</title>
-	<para><emphasis role='bold'>Last edited by:</emphasis> Bogdan-Andrei Iancu (<ulink url="https://github.com/bogdan-iancu">@bogdan-iancu</ulink>), Liviu Chircu (<ulink url="https://github.com/liviuchircu">@liviuchircu</ulink>), Razvan Crainea (<ulink url="https://github.com/razvancrainea">@razvancrainea</ulink>), Ionut Ionita (<ulink url="https://github.com/ionutrazvanionita">@ionutrazvanionita</ulink>).</para>
+	<para><emphasis role='bold'>Last edited by:</emphasis> Liviu Chircu (<ulink url="https://github.com/liviuchircu">@liviuchircu</ulink>), Bogdan-Andrei Iancu (<ulink url="https://github.com/bogdan-iancu">@bogdan-iancu</ulink>), Razvan Crainea (<ulink url="https://github.com/razvancrainea">@razvancrainea</ulink>), Ionut Ionita (<ulink url="https://github.com/ionutrazvanionita">@ionutrazvanionita</ulink>).</para>
 </section>
 
 </chapter>

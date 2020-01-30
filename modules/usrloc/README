@@ -229,10 +229,10 @@ Chapter 1. Admin Guide
    order to share the reachability of these contacts with the
    global OpenSIPS user location cluster, registrar nodes will
    only publish some light "metadata" entries for any new
-   Addresses-of-Record which are reachable from it. These entries
-   will cause other nodes to also fork additional SIP branches
-   pointing to the above-mentioned registrar upon receiving a call
-   for the above-mentioned Addresses-of-Record.
+   Addresses-of-Record which are reachable from them. These
+   entries will cause other nodes to also fork additional SIP
+   branches pointing to the above-mentioned registrar upon
+   receiving a call for the above-mentioned Addresses-of-Record.
 
    The federation topology is an optimized solution for the
    following core problems:
@@ -266,17 +266,17 @@ Chapter 1. Admin Guide
 
 1.2.2. "Full Sharing" Topology
 
-   A fully sharing user location propagates (broadcasts) contact
-   information to all data nodes (OpenSIPS or NoSQL). The main
-   assumption behind this mode is that any routing restrictions
-   have been alleviated beforehand. Consequently, either SIP
-   traffic egressing from a "full sharing" OpenSIPS user location
-   topology is being intermediated by an additional SIP edge
-   endpoint of our platform, or there are no egress IP
-   restrictions at all (for example, if all SIP UAs have public
-   IPs). In this setup, all OpenSIPS user location nodes are
-   equivalent to one another, as they each have access to the same
-   dataset and have no routing restrictions.
+   A fully sharing user location broadcasts contact information to
+   all data nodes (OpenSIPS or NoSQL). The main assumption behind
+   this mode is that any routing restrictions have been alleviated
+   beforehand. Consequently, either SIP traffic egressing from a
+   "full sharing" OpenSIPS user location topology is being
+   intermediated by an additional SIP edge endpoint of our
+   platform, or there are no egress IP restrictions at all (for
+   example, if all SIP UAs have public IPs). In this setup, all
+   OpenSIPS user location nodes are equivalent to one another, as
+   they each have access to the same dataset and have no routing
+   restrictions.
 
    The full sharing topology is an appropriate solution for
    multi-layer VoIP platforms, where the OpenSIPS registrar nodes
@@ -294,9 +294,10 @@ Chapter 1. Admin Guide
    Currently, registrations may optionally be fully managed inside
    NoSQL databases which support key/multi-value column-like
    associations. Example known backends to support these
-   abstractions at the time of writing are MongoDB and Cassandra.
-   Of these two, only the MongoDB OpenSIPS driver has been so far
-   extended to implement the required NoSQL API endpoints.
+   abstractions are MongoDB and Apache Cassandra. In OpenSIPS 2.4,
+   the MongoDB OpenSIPS driver is the only cache DB driver to
+   implement the required capabilities. The equivalent support for
+   Apache Cassandra 3.x was added for the 3.0 OpenSIPS release.
 
    The "full sharing" user location tutorial contains precise
    details on how to achieve this setup (including full NoSQL
@@ -311,9 +312,9 @@ Chapter 1. Admin Guide
    aware of each other, they will each scan the entire contact
    dataset, thus periodically sending "N pings" instead of "1
    ping" for each contact. This difference directly affects
-   service scalability, as well as the amount of consumed cloud
-   compute resources such as CPU and network bandwidth, both on
-   the service and client side.
+   service scalability, as well as the amount of consumed
+   resources such as CPU and network bandwidth, both on the
+   service and client side.
 
    This problem is solved with the help of the OpenSIPS cluster
    layer, which makes all nodes aware of each others' presence.
@@ -613,15 +614,17 @@ modparam("usrloc", "desc_time_order", 1)
 
 1.5.22. timer_interval (integer)
 
-   Number of seconds between two timer runs. The module uses timer
-   to delete expired contacts, synchronize with database and other
-   tasks, that need to be run periodically.
+   Number of seconds between two timer runs. During each run, the
+   module will update/delete dirty/expired contacts from memory
+   and/or mirror these operations to the database, if configured
+   to do so.
 
 Warning
 
-   In case of crash or restart contacts that are in memory only
-   and haven't been flushed yet will get lost. If you want
-   minimize the risk, use a shorter timer interval.
+   In case of an OpenSIPS shutdown or even a crash, contacts which
+   are in memory only and have not been flushed yet to disk will
+   NOT get lost! OpenSIPS will try its best to do a last-minute
+   sync to DB right before shutting down.
 
    Default value is 60.
 
@@ -698,9 +701,10 @@ modparam("usrloc", "db_mode", 2)
        all modified or new contacts to database. Use this scheme
        if you encounter high-load peaks and want them to process
        as fast as possible. The mode will not help at all if the
-       load is high all the time. Also, latency of this mode is
-       much lower than latency of mode 1, but slightly higher than
-       latency of mode 0.
+       load is high all the time. The added latency on the SIP
+       signaling when using this asynchronous preset is much lower
+       than the one added by the safe but blocking,
+       "single-instance-sql-write-through" preset.
      * "sql-only" - DB-Only scheme. No memory cache is kept, all
        operations being directly performed with the database. The
        timer deletes all expired contacts from database - cleans
@@ -740,7 +744,7 @@ modparam("usrloc", "working_mode_preset", "full-sharing-cachedb-cluster"
 1.5.27. cluster_mode (string)
 
    This parameter will get overridden if either
-   working_mode_preset or db_mode are set.
+   working_mode_preset or db_mode is set.
 
    The behavior of the global OpenSIPS user location cluster.
    Refer to section Distributed SIP User Location for details.
@@ -752,21 +756,21 @@ modparam("usrloc", "working_mode_preset", "full-sharing-cachedb-cluster"
        cluster nodes can fork SIP traffic over to the current
        node. Consequently, the location_cluster and cachedb_url
        parameters are mandatory.
-     * "full-sharing" - Full contact data broadcasting (mirroring)
-       to all other OpenSIPS cluster participants. inside a NoSQL
-       database, so other cluster nodes are able to route SIP
-       traffic through the current node. Consequently, the
-       location_cluster parameter is mandatory.
+     * "full-sharing" - Broadcast contact updates (full-mesh
+       mirroring) to all other OpenSIPS cluster participants. Each
+       node will hold the entire user location dataset.
+       Consequently, the location_cluster parameter is mandatory.
      * "full-sharing-cachedb" - Full contact data management
        through the use of a NoSQL database (somewhat resembling
        the "sql-only" preset). The cluster layer is still required
        in order to be able to partition and spread the pinging
        workload evenly among participating OpenSIPS nodes.
-       Consequently, the location_cluster parameter is mandatory.
+       Consequently, the location_cluster and cachedb_url
+       parameters are mandatory.
      * "sql-only" - Multiple OpenSIPS boxes using a common db_url
        without necessarily being aware of each other.
 
-   Default value is none (single instance mode).
+   Default value is "none" (single instance mode).
 
    Example 1.27. Set cluster_mode parameter
 ...
@@ -1006,15 +1010,17 @@ modparam("usrloc", "latency_event_min_us_delta", 300000)
    the clustering layer that keeps track of the current number of
    active nodes.
 
-   Disabling this parameter may be useful in simple active/backup
-   setups, where only the active node must perform the pinging.
+   Keeping this parameter disabled may be useful in simple
+   active/backup setups, where only the active node must perform
+   the pinging.
 
-   Default value is “1 (enabled)”.
+   Default value is “0 (disabled)”.
 
    Example 1.39. Set shared_pinging parameter
 ...
-# do not partition the pinging workload across cluster nodes
-modparam("usrloc", "shared_pinging", 0)
+# partition the pinging workload across cluster nodes in a "full-sharing
+" mode
+modparam("usrloc", "shared_pinging", 1)
 ...
 
 1.5.40. mi_dump_kv_store (integer)
@@ -1071,7 +1077,9 @@ modparam("usrloc", "mi_dump_kv_store", 1)
 
 1.7.4.  ul_flush
 
-   Triggers the flush of USRLOC memory cache into DB.
+   Force a flush of all pending usrloc cache changes to the
+   database. Normally, this routine runs every timer_interval
+   seconds.
 
 1.7.5.  ul_add
 
@@ -1101,17 +1109,18 @@ modparam("usrloc", "mi_dump_kv_store", 1)
 
 1.7.7.  ul_sync
 
-   Synchronizes the contacts from memory with the ones from
-   database. Note that this can not be used when no database is
-   specified or with the DB-Only scheme. Important: make sure that
-   all your contacts are in memory (ul_dump MI function) before
-   executing this command. If the AOR is not specified, the whole
-   table will be synchronized.
+   Empty the location table, then synchronize it with all contacts
+   from memory. Note that this can not be used when no database is
+   specified or with the DB-Only scheme.
+
+   Important: make sure that all your contacts are in memory
+   (ul_dump MI function) before executing this command.
 
    Parameters:
      * table name - table where the AOR resides (Ex: location).
-     * AOR (optional) - user AOR in username[@domain] format
-       (domain must be supplied only if use_domain option is on).
+     * AOR (optional) - only delete/sync this user AOR, not the
+       whole table. Format: "username[@domain]" (domain is
+       required only if use_domain option is on).
 
 1.7.8.  ul_cluster_sync
 
@@ -1470,26 +1479,27 @@ Chapter 3. Contributors
    commits^(2) and lines added/removed^(3)
      Name DevScore Commits Lines ++ Lines --
    1. Jan Janak (@janakj) 421 117 15689 10095
-   2. Bogdan-Andrei Iancu (@bogdan-iancu) 231 136 3960 3494
-   3. Liviu Chircu (@liviuchircu) 197 118 5744 1827
+   2. Bogdan-Andrei Iancu (@bogdan-iancu) 235 139 3977 3533
+   3. Liviu Chircu (@liviuchircu) 218 136 5919 1942
    4. Ionut Ionita (@ionutrazvanionita) 41 24 1099 413
    5. Daniel-Constantin Mierla (@miconda) 40 29 544 308
    6. Jiri Kuthan (@jiriatipteldotorg) 36 25 975 120
-   7. Vlad Patrascu (@rvlad-patrascu) 23 14 404 269
-   8. Henning Westerholt (@henningw) 22 11 462 356
-   9. Razvan Crainea (@razvancrainea) 20 15 330 70
+   7. Razvan Crainea (@razvancrainea) 28 22 380 121
+   8. Vlad Patrascu (@rvlad-patrascu) 23 14 404 269
+   9. Henning Westerholt (@henningw) 22 11 462 356
    10. Andrei Pelinescu-Onciul 17 13 151 91
 
    All remaining contributors: Vlad Paiu (@vladpaiu), Nils
    Ohlmeier, Eseanu Marius Cristian (@eseanucristian), Ovidiu Sas
    (@ovidiusas), Ionel Cerghit (@ionel-cerghit), Maksym Sobolyev
-   (@sobomax), Andrei Dragus, Dusan Klinec, Andrei Datcu
-   (@andrei-datcu), Juha Heinanen (@juha-h), Anca Vamanu, Marcus
-   Hunger, Jamey Hicks, Andreas Granig, Shlomi Gutman, @jalung,
-   Jeffrey Magder, Phil D'Amore, Norman Brandinger (@NormB), David
-   Sanders, Konstantin Bokarius, Klaus Darilion, Iouri Kharon,
-   Matthew M. Boedicker, UnixDev, Edson Gellert Schubert,
-   Elena-Ramona Modroiu, Stephane Alnet.
+   (@sobomax), Andrei Dragus, Alessio Garzi (@Ozzyboshi), Dusan
+   Klinec, Andrei Datcu (@andrei-datcu), Juha Heinanen (@juha-h),
+   Anca Vamanu, Marcus Hunger, Jamey Hicks, Andreas Granig, Shlomi
+   Gutman, @jalung, Jeffrey Magder, Phil D'Amore, Norman
+   Brandinger (@NormB), David Sanders, Walter Doekes (@wdoekes),
+   Konstantin Bokarius, Klaus Darilion, Iouri Kharon, Aron
+   Podrigal (@ar45), Matthew M. Boedicker, UnixDev, Edson Gellert
+   Schubert, Elena-Ramona Modroiu, Stephane Alnet.
 
    (1) DevScore = author_commits + author_lines_added /
    (project_lines_added / project_commits) + author_lines_deleted
@@ -1511,28 +1521,29 @@ Chapter 3. Contributors
 
    Table 3.2. Most recently active contributors^(1) to this module
                       Name                   Commit Activity
-   1.  Bogdan-Andrei Iancu (@bogdan-iancu) Mar 2002 - Aug 2018
-   2.  Vlad Patrascu (@rvlad-patrascu)     Jul 2016 - Aug 2018
-   3.  Liviu Chircu (@liviuchircu)         Jan 2013 - Aug 2018
-   4.  Razvan Crainea (@razvancrainea)     Jul 2011 - Jul 2018
-   5.  Shlomi Gutman                       Mar 2018 - Mar 2018
-   6.  @jalung                             Aug 2017 - Aug 2017
-   7.  Vlad Paiu (@vladpaiu)               Jun 2011 - Jul 2017
-   8.  Ionut Ionita (@ionutrazvanionita)   Jul 2015 - Apr 2017
-   9.  Ionel Cerghit (@ionel-cerghit)      Jul 2015 - Dec 2016
-   10. Ovidiu Sas (@ovidiusas)             Apr 2008 - Mar 2016
+   1.  Liviu Chircu (@liviuchircu)         Jan 2013 - Jan 2020
+   2.  Bogdan-Andrei Iancu (@bogdan-iancu) Mar 2002 - Nov 2019
+   3.  Razvan Crainea (@razvancrainea)     Jul 2011 - Sep 2019
+   4.  Aron Podrigal (@ar45)               Aug 2019 - Aug 2019
+   5.  Alessio Garzi (@Ozzyboshi)          Aug 2019 - Aug 2019
+   6.  Walter Doekes (@wdoekes)            Apr 2019 - Apr 2019
+   7.  Vlad Patrascu (@rvlad-patrascu)     Jul 2016 - Aug 2018
+   8.  Shlomi Gutman                       Mar 2018 - Mar 2018
+   9.  @jalung                             Aug 2017 - Aug 2017
+   10. Vlad Paiu (@vladpaiu)               Jun 2011 - Jul 2017
 
-   All remaining contributors: Dusan Klinec, Eseanu Marius
-   Cristian (@eseanucristian), David Sanders, Andrei Datcu
-   (@andrei-datcu), Stephane Alnet, Andrei Dragus, Phil D'Amore,
-   UnixDev, Daniel-Constantin Mierla (@miconda), Henning
-   Westerholt (@henningw), Iouri Kharon, Konstantin Bokarius,
-   Edson Gellert Schubert, Anca Vamanu, Matthew M. Boedicker,
-   Marcus Hunger, Elena-Ramona Modroiu, Jeffrey Magder, Norman
-   Brandinger (@NormB), Andreas Granig, Juha Heinanen (@juha-h),
-   Klaus Darilion, Jan Janak (@janakj), Andrei Pelinescu-Onciul,
-   Jiri Kuthan (@jiriatipteldotorg), Maksym Sobolyev (@sobomax),
-   Jamey Hicks, Nils Ohlmeier.
+   All remaining contributors: Ionut Ionita (@ionutrazvanionita),
+   Ionel Cerghit (@ionel-cerghit), Ovidiu Sas (@ovidiusas), Dusan
+   Klinec, Eseanu Marius Cristian (@eseanucristian), David
+   Sanders, Andrei Datcu (@andrei-datcu), Stephane Alnet, Andrei
+   Dragus, Phil D'Amore, UnixDev, Daniel-Constantin Mierla
+   (@miconda), Henning Westerholt (@henningw), Iouri Kharon,
+   Konstantin Bokarius, Edson Gellert Schubert, Anca Vamanu,
+   Matthew M. Boedicker, Marcus Hunger, Elena-Ramona Modroiu,
+   Jeffrey Magder, Norman Brandinger (@NormB), Andreas Granig,
+   Juha Heinanen (@juha-h), Klaus Darilion, Jan Janak (@janakj),
+   Andrei Pelinescu-Onciul, Jiri Kuthan (@jiriatipteldotorg),
+   Maksym Sobolyev (@sobomax), Jamey Hicks, Nils Ohlmeier.
 
    (1) including any documentation-related commits, excluding
    merge commits
@@ -1541,8 +1552,8 @@ Chapter 4. Documentation
 
 4.1. Contributors
 
-   Last edited by: Vlad Patrascu (@rvlad-patrascu), Liviu Chircu
-   (@liviuchircu), Bogdan-Andrei Iancu (@bogdan-iancu), Razvan
+   Last edited by: Liviu Chircu (@liviuchircu), Vlad Patrascu
+   (@rvlad-patrascu), Bogdan-Andrei Iancu (@bogdan-iancu), Razvan
    Crainea (@razvancrainea), Ionut Ionita (@ionutrazvanionita),
    Eseanu Marius Cristian (@eseanucristian), Ovidiu Sas
    (@ovidiusas), Andrei Datcu (@andrei-datcu), Daniel-Constantin

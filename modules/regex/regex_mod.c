@@ -161,6 +161,7 @@ struct module_exports exports = {
 	MOD_TYPE_DEFAULT,/* class of this module */
 	MODULE_VERSION,
 	DEFAULT_DLFLAGS,           /*!< dlopen flags */
+	0,				           /*!< load function */
 	NULL,            /* OpenSIPS module dependencies */
 	cmds,                      /*!< exported functions */
 	0,                         /*!< exported async functions */
@@ -170,6 +171,7 @@ struct module_exports exports = {
 	0,                         /*!< exported pseudo-variables */
 	0,                         /*!< exported transformations */
 	0,                         /*!< extra processes */
+	0,                         /*!< module pre-initialization function */
 	mod_init,                  /*!< module initialization function */
 	(response_function) 0,     /*!< response handling function */
 	destroy,                   /*!< destroy function */
@@ -397,7 +399,7 @@ static int load_pcres(int action)
 	}
 
 	/* Log the group patterns */
-	LM_NOTICE("num groups = %d\n\n", num_pcres_tmp);
+	LM_NOTICE("num groups = %d\n", num_pcres_tmp);
 	for (i=0; i < num_pcres_tmp; i++) {
 		LM_NOTICE("<group[%d]>%s</group[%d]> (size = %i)\n", i, patterns[i], i, (int)strlen(patterns[i]));
 	}

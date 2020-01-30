@@ -34,10 +34,15 @@
  *
  */
 
+#ifdef __OS_linux
+#define _GNU_SOURCE /* we need this for gettid() */
+#endif
+
 #include <openssl/ui.h>
 #include <openssl/ssl.h>
 #include <openssl/opensslv.h>
 #include <openssl/err.h>
+#include <openssl/rand.h>
 
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -64,6 +69,7 @@
 #include "../../db/db.h"
 
 #include "../../net/proto_tcp/tcp_common_defs.h"
+#include "tls_conn_server.h"
 #include "tls_config.h"
 #include "tls_domain.h"
 #include "tls_params.h"
@@ -103,6 +109,7 @@
 static char *tls_domain_avp = NULL;
 
 static int  mod_init(void);
+static int  mod_load(void);
 static void mod_destroy(void);
 static int tls_get_handshake_timeout(void);
 static int tls_get_send_timeout(void);
@@ -115,9 +122,6 @@ static int list_domain(struct mi_node *root, struct tls_domain *d);
 static db_con_t *db_hdl = 0;
 /* DB functions */
 static db_func_t dr_dbf;
-
-/* definition of exported functions */
-static int is_peer_verified(struct sip_msg*, char*, char*);
 
 static param_export_t params[] = {
 	{ "client_domain_avp",     STR_PARAM,         &tls_domain_avp            },
@@ -157,7 +161,7 @@ static param_export_t params[] = {
 };
 
 static cmd_export_t cmds[] = {
-	{"is_peer_verified", (cmd_function)is_peer_verified,   0, 0, 0,
+	{"is_peer_verified", (cmd_function)tls_is_peer_verified,   0, 0, 0,
 		REQUEST_ROUTE},
 	{"load_tls_mgm", (cmd_function)load_tls_mgm,   0, 0, 0, 0},
 	{0,0,0,0,0,0}
@@ -347,6 +351,7 @@ struct module_exports exports = {
 	MOD_TYPE_DEFAULT,    /* class of this module */
 	MODULE_VERSION,
 	DEFAULT_DLFLAGS, /* dlopen flags */
+	mod_load,   /* load function */
 	NULL,            /* OpenSIPS module dependencies */
 	cmds,       /* exported functions */
 	0,          /* exported async functions */
@@ -356,6 +361,7 @@ struct module_exports exports = {
 	mod_items,          /* exported pseudo-variables */
 	0,			/* exported transformations */
 	0,          /* extra processes */
+	0,          /* module pre-initialization function */
 	mod_init,   /* module initialization function */
 	0,          /* response function */
 	mod_destroy,/* destroy function */
@@ -626,10 +632,6 @@ int verify_callback(int pre_verify_ok, X509_STORE_CTX *ctx) {
 
 	depth = X509_STORE_CTX_get_error_depth(ctx);
 	LM_NOTICE("depth = %d\n",depth);
-	if ( depth > VERIFY_DEPTH_S ) {
-		LM_NOTICE("cert chain too long ( depth > VERIFY_DEPTH_S)\n");
-		pre_verify_ok=0;
-	}
 
 	if( pre_verify_ok ) {
 		LM_NOTICE("preverify is good: verify return: %d\n", pre_verify_ok);
@@ -705,70 +707,10 @@ int verify_callback(int pre_verify_ok, X509_STORE_CTX *ctx) {
 }
 
 
-/*
- * Setup default SSL_CTX (and SSL * ) behavior:
- *     verification, cipherlist, acceptable versions, ...
- */
-static int init_ssl_ctx_behavior(struct tls_domain *d) {
-	int verify_mode;
-	int from_file = 0;
 
-#if (OPENSSL_VERSION_NUMBER > 0x10001000L)
-	/*
-	 * set dh params
-	 */
-	if (!d->dh_param.s) {
-		from_file = 1;
-		LM_DBG("no DH params file for tls domain '%.*s' defined, using default '%s'\n",
-				d->name.len, ZSW(d->name.s), tls_tmp_dh_file);
-		d->dh_param.s = tls_tmp_dh_file;
-		d->dh_param.len = len(tls_tmp_dh_file);
-	}
-	if (!(d->type & TLS_DOMAIN_DB) || from_file) {
-		if (d->dh_param.s && set_dh_params(d->ctx, d->dh_param.s) < 0)
-			return -1;
-	} else {
-		set_dh_params_db(d->ctx, &d->dh_param);
-	}
-	if (d->tls_ec_curve) {
-		if (set_ec_params(d->ctx, d->tls_ec_curve) < 0) {
-			return -1;
-		}
-	}
-	else {
-		LM_NOTICE("No EC curve defined\n");
-	}
-#else
-	if (d->tmp_dh_file  || tls_tmp_dh_file)
-		LM_INFO("DH params file discarded as not supported by your "
-			"openSSL version\n");
-	if (d->tls_ec_curve)
-		LM_INFO("EC params file discarded as not supported by your "
-			"openSSL version\n");
-#endif
 
-	if( d->ciphers_list != 0 ) {
-		if( SSL_CTX_set_cipher_list(d->ctx, d->ciphers_list) == 0 ) {
-			LM_ERR("failure to set SSL context "
-					"cipher list '%s'\n", d->ciphers_list);
-			return -1;
-		} else {
-			LM_NOTICE("cipher list set to %s\n", d->ciphers_list);
-		}
-	} else {
-		LM_DBG( "cipher list null ... setting default\n");
-	}
-
-	/* Set a bunch of options:
-	 *     do not accept SSLv2 / SSLv3
-	 *     no session resumption
-	 *     choose cipher according to server's preference's*/
-
-	SSL_CTX_set_options(d->ctx,
-			SSL_OP_ALL | SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 |
-			SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION |
-			SSL_OP_CIPHER_SERVER_PREFERENCE);
-
+static void get_ssl_ctx_verify_mode(struct tls_domain *d, int *verify_mode)
+{
 	/* Set verification procedure
 	 * The verification can be made null with SSL_VERIFY_NONE, or
 	 * at least easier with SSL_VERIFY_CLIENT_ONCE instead of
@@ -778,7 +720,7 @@ static int init_ssl_ctx_behavior(struct tls_domain *d) {
 	 * Also, depth 2 may be not enough in some scenarios ... though no need
 	 * to increase it much further */
 
-	if (d->type & TLS_DOMAIN_SRV) {
+	if (d->type & TLS_DOMAIN_DB) {
 		/* Server mode:
 		 * SSL_VERIFY_NONE
 		 *   the server will not send a client certificate request to the
@@ -802,16 +744,16 @@ static int init_ssl_ctx_behavior(struct tls_domain *d) {
 		 */
 
 		if( d->verify_cert ) {
-			verify_mode = SSL_VERIFY_PEER;
+			*verify_mode = SSL_VERIFY_PEER;
 			if( d->require_client_cert ) {
 				LM_INFO("client verification activated. Client "
 						"certificates are mandatory.\n");
-				verify_mode |= SSL_VERIFY_FAIL_IF_NO_PEER_CERT;
+				*verify_mode |= SSL_VERIFY_FAIL_IF_NO_PEER_CERT;
 			} else
 				LM_INFO("client verification activated. Client "
 						"certificates are NOT mandatory.\n");
 		} else {
-			verify_mode = SSL_VERIFY_NONE;
+			*verify_mode = SSL_VERIFY_NONE;
 			LM_INFO("client verification NOT activated. Weaker security.\n");
 		}
 	} else {
@@ -836,23 +778,15 @@ static int init_ssl_ctx_behavior(struct tls_domain *d) {
 		 */
 
 		if( d->verify_cert ) {
-			verify_mode = SSL_VERIFY_PEER;
+			*verify_mode = SSL_VERIFY_PEER;
 			LM_INFO("server verification activated.\n");
 		} else {
-			verify_mode = SSL_VERIFY_NONE;
+			*verify_mode = SSL_VERIFY_NONE;
 			LM_INFO("server verification NOT activated. Weaker security.\n");
 		}
 	}
-
-	SSL_CTX_set_verify( d->ctx, verify_mode, verify_callback);
-	SSL_CTX_set_verify_depth( d->ctx, VERIFY_DEPTH_S);
-
-	SSL_CTX_set_session_cache_mode( d->ctx, SSL_SESS_CACHE_SERVER );
-	SSL_CTX_set_session_id_context( d->ctx, OS_SSL_SESS_ID,
-			OS_SSL_SESS_ID_LEN );
-
-	return 0;
 }
+
 
 /*
  * load a certificate from a file
@@ -873,8 +807,6 @@ static int load_certificate(SSL_CTX * ctx, char *filename)
 	return 0;
 }
 
-/* TODO: currently we can't load a chain of certificates from database
-*/
 static int load_certificate_db(SSL_CTX * ctx, str *blob)
 {
 	X509 *cert = NULL;
@@ -887,18 +819,36 @@ static int load_certificate_db(SSL_CTX * ctx, str *blob)
 	}
 
 	cert = PEM_read_bio_X509(cbio, NULL, 0, NULL);
-	BIO_free(cbio);
 	if (!cert) {
-		LM_ERR("unable to load certificate from buffer\n");
+		LM_ERR("Unable to load certificate from buffer\n");
+		BIO_free(cbio);
 		return -1;
 	}
 
 	if (! SSL_CTX_use_certificate(ctx, cert)) {
-		LM_ERR("unable to use certificate\n");
+		LM_ERR("Unable to use certificate\n");
+		X509_free(cert);
+		BIO_free(cbio);
+		return -1;
+	}
+	tls_dump_cert_info("Certificate loaded: ", cert);
+	X509_free(cert);
+
+	while ((cert = PEM_read_bio_X509(cbio, NULL, 0, NULL)) != NULL) {
+		if (!SSL_CTX_add_extra_chain_cert(ctx, cert)){
+			tls_dump_cert_info("Unable to add chain cert: ", cert);
+			X509_free(cert);
+			BIO_free(cbio);
+			return -1;
+		}
+		/* The x509 certificate provided to SSL_CTX_add_extra_chain_cert()
+		*	will be freed by the library when the SSL_CTX is destroyed.
+		*	An application should not free the x509 object.a*/
+		tls_dump_cert_info("Chain certificate loaded: ", cert);
 	}
 
-	X509_free(cert);
-	LM_DBG("successfully loaded\n");
+	BIO_free(cbio);
+	LM_DBG("Successfully loaded\n");
 	return 0;
 }
 
@@ -1010,7 +960,7 @@ static int load_ca(SSL_CTX * ctx, char *filename)
 static int load_ca_db(SSL_CTX * ctx, str *blob)
 {
 	X509_STORE *store;
-	X509 *cert;
+	X509 *cert = NULL;
 	BIO *cbio;
 
 	cbio = BIO_new_mem_buf((void*)blob->s,blob->len);
@@ -1020,28 +970,25 @@ static int load_ca_db(SSL_CTX * ctx, str *blob)
 		return -1;
 	}
 
-	cert = PEM_read_bio_X509(cbio, NULL, 0, NULL);
-	BIO_free(cbio);
-
-	if (!cert) {
-		LM_ERR("unable to load certificate from buffer\n");
-		return -1;
-	}
-
 	store =  SSL_CTX_get_cert_store(ctx);
 	if(!store) {
-		X509_free(cert);
+		BIO_free(cbio);
 		LM_ERR("Unable to get X509 store from ssl context\n");
 		return -1;
 	}
 
-	if (!X509_STORE_add_cert(store, cert)){
+	while ((cert = PEM_read_bio_X509_AUX(cbio, NULL, 0, NULL)) != NULL) {
+		tls_dump_cert_info("CA loaded: ", cert);
+		if (!X509_STORE_add_cert(store, cert)){
+			tls_dump_cert_info("Unable to add ca: ", cert);
+			X509_free(cert);
+			BIO_free(cbio);
+			return -1;
+		}
 		X509_free(cert);
-		LM_ERR("Unable to add ca\n");
-		return -1;
 	}
 
-	X509_free(cert);
+	BIO_free(cbio);
 	LM_DBG("CA successfully loaded\n");
 	return 0;
 }
@@ -1165,12 +1112,64 @@ static int load_private_key_db(SSL_CTX * ctx, str *blob)
 }
 
 
+static void destroy_tls_dom(struct tls_domain *d)
+{
+	int i;
+	if (d->ctx) {
+		for (i = 0; i < d->ctx_no; i++)
+			SSL_CTX_free(d->ctx[i]);
+		shm_free(d->ctx);
+	}
+	lock_destroy(d->lock);
+	lock_dealloc(d->lock);
+	shm_free(d);
+}
+
 static int init_tls_dom(struct tls_domain *d)
 {
-	int from_file = 0;
+	int cert_from_file = 0;
+	int ca_from_file = 0;
+	int verify_mode = 0;
+	unsigned i, tcp_procs;
+	SSL_CTX *ctx;
+	char *ciphers_list = NULL;
+#if (OPENSSL_VERSION_NUMBER > 0x10001000L)
+	int dh_from_file = 0;
+#endif
 
 	LM_INFO("Processing TLS domain '%.*s'\n",
 			d->name.len, ZSW(d->name.s));
+
+#if (OPENSSL_VERSION_NUMBER > 0x10001000L)
+	/*
+	 * set dh params
+	 */
+	if (!d->dh_param.s) {
+		dh_from_file = 1;
+		LM_DBG("no DH params file for tls domain '%.*s' defined, using default '%s'\n",
+				d->name.len, ZSW(d->name.s), tls_tmp_dh_file);
+		d->dh_param.s = tls_tmp_dh_file;
+		d->dh_param.len = len(tls_tmp_dh_file);
+	}
+	if (!d->tls_ec_curve)
+		LM_NOTICE("No EC curve defined\n");
+#else
+	if (d->tmp_dh_file  || tls_tmp_dh_file)
+		LM_INFO("DH params file discarded as not supported by your "
+			"openSSL version\n");
+	if (d->tls_ec_curve)
+		LM_INFO("EC params file discarded as not supported by your "
+			"openSSL version\n");
+#endif
+
+	if( d->ciphers_list != 0 ) {
+		ciphers_list = d->ciphers_list;
+		LM_NOTICE("setting cipher list to %s\n", ciphers_list);
+	} else {
+		LM_DBG( "cipher list null ... setting default\n");
+	}
+
+	get_ssl_ctx_verify_mode(d, &verify_mode);
 
 	/*
 	 * set method
@@ -1181,66 +1180,20 @@ static int init_tls_dom(struct tls_domain *d)
 		d->method = tls_default_method;
 	}
 
-	/*
-	 * create context
-	 */
-	d->ctx = SSL_CTX_new(ssl_methods[d->method - 1]);
-	if (d->ctx == NULL) {
-		LM_ERR("cannot create ssl context for tls domain '%.*s'\n",
-			d->name.len, ZSW(d->name.s));
-		return -1;
-	}
-
-	if (init_ssl_ctx_behavior(d) < 0)
-		return -1;
-
-	/*
-	 * load certificate
-	 */
 	if (!d->cert.s) {
-		from_file = 1;
+		cert_from_file = 1;
 		LM_NOTICE("no certificate for tls domain '%.*s' defined, using default '%s'\n",
 				d->name.len, ZSW(d->name.s), tls_cert_file);
 		d->cert.s = tls_cert_file;
 		d->cert.len = len(tls_cert_file);
 	}
 
-	if (!(d->type & TLS_DOMAIN_DB) || from_file) {
-		if (load_certificate(d->ctx, d->cert.s) < 0)
-			return -1;
-	} else
-		if (load_certificate_db(d->ctx, &d->cert) < 0)
-			return -1;
-
-	from_file = 0;
-
-	/**
-	 * load crl from directory
-	 */
-	if (!d->crl_directory) {
-		LM_NOTICE("no crl for tls, using none\n");
-	} else {
-		if(load_crl(d->ctx, d->crl_directory, d->crl_check_all) < 0)
-			return -1;
-	}
-
-	/*
-	 * load ca
-	 */
 	if (!d->ca.s) {
-		from_file = 1;
+		ca_from_file = 1;
 		LM_NOTICE("no CA list for tls domain '%.*s' defined, using default '%s'\n",
 				d->name.len, ZSW(d->name.s), tls_ca_file);
 		d->ca.s = tls_ca_file;
 		d->ca.len = len(tls_ca_file);
-	}
-
-	if (!(d->type & TLS_DOMAIN_DB) || from_file) {
-		if (d->ca.s && load_ca(d->ctx, d->ca.s) < 0)
-			return -1;
-	} else {
-		if (load_ca_db(d->ctx, &d->ca) < 0)
-			return -1;
 	}
 
 	/*
@@ -1252,8 +1205,114 @@ static int init_tls_dom(struct tls_domain *d)
 		d->ca_directory = tls_ca_dir;
 	}
 
-	if (d->ca_directory && load_ca_dir(d->ctx, d->ca_directory) < 0)
-		return -1;
+	if (!d->crl_directory)
+		LM_NOTICE("no crl for tls, using none\n");
+
+	tcp_procs = count_child_processes();
+
+	d->ctx = shm_malloc(tcp_procs * sizeof(SSL_CTX *));
+	if (!d->ctx) {
+		LM_ERR("cannot allocate ssl ctx per process!\n");
+		return 0;
+	}
+	d->ctx_no = tcp_procs;
+
+	for (i = 0; i < tcp_procs; i++) {
+		/*
+		 * create context
+		 */
+#if OPENSSL_VERSION_NUMBER >= 0x10100000L
+		ctx = SSL_CTX_new(TLS_method());
+#else
+		ctx = SSL_CTX_new(ssl_methods[d->method - 1]);
+#endif
+		if (ctx == NULL) {
+			LM_ERR("cannot create ssl context for tls domain '%.*s'\n",
+				d->name.len, ZSW(d->name.s));
+			return -1;
+		}
+
+#if OPENSSL_VERSION_NUMBER >= 0x10100000L
+		if (d->method != TLS_USE_SSLv23) {
+			if (!SSL_CTX_set_min_proto_version(ctx,
+					ssl_versions[d->method - 1]) ||
+				!SSL_CTX_set_max_proto_version(ctx,
+					ssl_versions[d->method - 1])) {
+				LM_ERR("cannot enforce ssl version for tls domain '%.*s'\n",
+						d->name.len, ZSW(d->name.s));
+				return -1;
+			}
+		}
+#endif
+
+#if (OPENSSL_VERSION_NUMBER > 0x10001000L)
+		if (!(d->type & TLS_DOMAIN_DB) || dh_from_file) {
+			if (d->dh_param.s && set_dh_params(ctx, d->dh_param.s) < 0)
+				return -1;
+		} else {
+			set_dh_params_db(ctx, &d->dh_param);
+		}
+		if (d->tls_ec_curve && set_ec_params(ctx, d->tls_ec_curve) < 0)
+			return -1;
+#endif
+
+		if (ciphers_list != 0 && SSL_CTX_set_cipher_list(ctx, d->ciphers_list) == 0 ) {
+			LM_ERR("failure to set SSL context "
+					"cipher list '%s'\n", d->ciphers_list);
+			return -1;
+		}
+
+		/* Set a bunch of options:
+		 *     do not accept SSLv2 / SSLv3
+		 *     no session resumption
+		 *     choose cipher according to server's preference's*/
+
+		SSL_CTX_set_options(ctx,
+				SSL_OP_ALL | SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 |
+				SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION |
+				SSL_OP_CIPHER_SERVER_PREFERENCE);
+
+
+		SSL_CTX_set_verify(ctx, verify_mode, verify_callback);
+		SSL_CTX_set_verify_depth(ctx, VERIFY_DEPTH_S);
+
+		//SSL_CTX_set_session_cache_mode(ctx, SSL_SESS_CACHE_SERVER );
+		SSL_CTX_set_session_cache_mode(ctx, SSL_SESS_CACHE_OFF );
+		SSL_CTX_set_session_id_context(ctx, OS_SSL_SESS_ID,
+				OS_SSL_SESS_ID_LEN );
+
+		/*
+		 * load certificate
+		 */
+		if (!(d->type & TLS_DOMAIN_DB) || cert_from_file) {
+			if (load_certificate(ctx, d->cert.s) < 0)
+				return -1;
+		} else
+			if (load_certificate_db(ctx, &d->cert) < 0)
+				return -1;
+
+		/**
+		 * load crl from directory
+		 */
+		if (d->crl_directory && load_crl(ctx, d->crl_directory, d->crl_check_all) < 0)
+			return -1;
+
+		/*
+		 * load ca
+		 */
+		if (!(d->type & TLS_DOMAIN_DB) || ca_from_file) {
+			if (d->ca.s && load_ca(ctx, d->ca.s) < 0)
+				return -1;
+		} else {
+			if (load_ca_db(ctx, &d->ca) < 0)
+				return -1;
+		}
+
+		if (d->ca_directory && load_ca_dir(ctx, d->ca_directory) < 0)
+			return -1;
+
+		d->ctx[i] = ctx;
+	}
 
 	return 0;
 }
@@ -1266,6 +1325,7 @@ static int init_tls_domains(struct tls_domain **dom)
 	struct tls_domain *d, *tmp, *prev = NULL;
 	int from_file = 0;
 	int rc;
+	int i;
 	int db = 0;
 
 	d = *dom;
@@ -1286,11 +1346,7 @@ static int init_tls_domains(struct tls_domain **dom)
 
 			tmp = d;
 			d = d->next;
-			if (tmp->ctx)
-				SSL_CTX_free(tmp->ctx);
-			lock_destroy(tmp->lock);
-			lock_dealloc(tmp->lock);
-			shm_free(tmp);
+			destroy_tls_dom(tmp);
 
 			if (!db)
 				return -1;
@@ -1314,10 +1370,15 @@ static int init_tls_domains(struct tls_domain **dom)
 			from_file = 1;
 		}
 
-		if (!(d->type & TLS_DOMAIN_DB) || from_file)
-			rc = load_private_key(d->ctx, d->pkey.s);
-		else
-			rc = load_private_key_db(d->ctx, &d->pkey);
+		rc = 0;
+		for (i = 0; i < d->ctx_no; i++) {
+			if (!(d->type & TLS_DOMAIN_DB) || from_file)
+				rc = load_private_key(d->ctx[i], d->pkey.s);
+			else
+				rc = load_private_key_db(d->ctx[i], &d->pkey);
+			if (rc < 0)
+				break;
+		}
 
 		if (rc < 0) {
 			db = d->type & TLS_DOMAIN_DB;
@@ -1335,11 +1396,7 @@ static int init_tls_domains(struct tls_domain **dom)
 
 			tmp = d;
 			d = d->next;
-			if (tmp->ctx)
-				SSL_CTX_free(tmp->ctx);
-			lock_destroy(tmp->lock);
-			lock_dealloc(tmp->lock);
-			shm_free(tmp);
+			destroy_tls_dom(tmp);
 
 			if (!db)
 				return -1;
@@ -1418,7 +1475,11 @@ static int tls_init_multithread(void)
 		CRYPTO_set_locking_callback(tls_static_locks_ops);
 	}
 
+#if OPENSSL_VERSION_NUMBER < 0x10000000L
 	CRYPTO_set_id_callback(tls_get_id);
+#else /* between 1.0.0 and 1.1.0 */
+	CRYPTO_THREADID_set_callback(tls_get_thread_id);
+#endif /* OPENSSL_VERSION_NUMBER */
 
 	/* dynamic locks support*/
 	CRYPTO_set_dynlock_create_callback(tls_dyn_lock_create);
@@ -1436,30 +1497,28 @@ static void
 init_ssl_methods(void)
 {
 
-#if OPENSSL_VERSION_NUMBER >= 0x10100000L
-	ssl_methods[TLS_USE_TLSv1_cli-1] = (SSL_METHOD*)TLS_client_method();
-	ssl_methods[TLS_USE_TLSv1_srv-1] = (SSL_METHOD*)TLS_server_method();
-	ssl_methods[TLS_USE_TLSv1-1] = (SSL_METHOD*)TLS_method();
-#else
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
 	ssl_methods[TLS_USE_TLSv1_cli-1] = (SSL_METHOD*)TLSv1_client_method();
 	ssl_methods[TLS_USE_TLSv1_srv-1] = (SSL_METHOD*)TLSv1_server_method();
 	ssl_methods[TLS_USE_TLSv1-1] = (SSL_METHOD*)TLSv1_method();
-#endif
 
 	ssl_methods[TLS_USE_SSLv23_cli-1] = (SSL_METHOD*)SSLv23_client_method();
 	ssl_methods[TLS_USE_SSLv23_srv-1] = (SSL_METHOD*)SSLv23_server_method();
 	ssl_methods[TLS_USE_SSLv23-1] = (SSL_METHOD*)SSLv23_method();
 
 #if OPENSSL_VERSION_NUMBER >= 0x10001000L
-#if OPENSSL_VERSION_NUMBER >= 0x10100000L
-	ssl_methods[TLS_USE_TLSv1_2_cli-1] = (SSL_METHOD*)TLS_client_method();
-	ssl_methods[TLS_USE_TLSv1_2_srv-1] = (SSL_METHOD*)TLS_server_method();
-	ssl_methods[TLS_USE_TLSv1_2-1] = (SSL_METHOD*)TLS_method();
-#else
 	ssl_methods[TLS_USE_TLSv1_2_cli-1] = (SSL_METHOD*)TLSv1_2_client_method();
 	ssl_methods[TLS_USE_TLSv1_2_srv-1] = (SSL_METHOD*)TLSv1_2_server_method();
 	ssl_methods[TLS_USE_TLSv1_2-1] = (SSL_METHOD*)TLSv1_2_method();
 #endif
+#else
+	ssl_versions[TLS_USE_TLSv1_2_cli-1] = TLS1_2_VERSION;
+	ssl_versions[TLS_USE_TLSv1_2_srv-1] = TLS1_2_VERSION;
+	ssl_versions[TLS_USE_TLSv1_2-1] = TLS1_2_VERSION;
+
+	ssl_versions[TLS_USE_TLSv1_cli-1] = TLS1_VERSION;
+	ssl_versions[TLS_USE_TLSv1_srv-1] = TLS1_VERSION;
+	ssl_versions[TLS_USE_TLSv1-1] = TLS1_VERSION;
 #endif
 }
 
@@ -1601,6 +1660,104 @@ static void openssl_on_exit(int status, void *param)
 }
 #endif
 
+
+#if (OPENSSL_VERSION_NUMBER >= 0x10100000L)
+static gen_lock_t *ssl_lock;
+static const RAND_METHOD *os_ssl_method;
+
+static int os_ssl_seed(const void *buf, int num)
+{
+	int ret;
+	if (!os_ssl_method || !ssl_lock || !os_ssl_method->seed)
+		return 0;
+	lock_get(ssl_lock);
+	ret = os_ssl_method->seed(buf, num);
+	lock_release(ssl_lock);
+	return ret;
+}
+
+static int os_ssl_bytes(unsigned char *buf, int num)
+{
+	int ret;
+	if (!os_ssl_method || !ssl_lock || !os_ssl_method->bytes)
+		return 0;
+	lock_get(ssl_lock);
+	ret = os_ssl_method->bytes(buf, num);
+	lock_release(ssl_lock);
+	return ret;
+}
+
+static void os_ssl_cleanup(void)
+{
+	if (!os_ssl_method || !ssl_lock || !os_ssl_method->cleanup)
+		return;
+	lock_get(ssl_lock);
+	os_ssl_method->cleanup();
+	lock_release(ssl_lock);
+}
+
+static int os_ssl_add(const void *buf, int num, double entropy)
+{
+	int ret;
+	if (!os_ssl_method || !ssl_lock || !os_ssl_method->add)
+		return 0;
+	lock_get(ssl_lock);
+	ret = os_ssl_method->add(buf, num, entropy);
+	lock_release(ssl_lock);
+	return ret;
+}
+
+static int os_ssl_pseudorand(unsigned char *buf, int num)
+{
+	int ret;
+	if (!os_ssl_method || !ssl_lock || !os_ssl_method->pseudorand)
+		return 0;
+	lock_get(ssl_lock);
+	ret = os_ssl_method->pseudorand(buf, num);
+	lock_release(ssl_lock);
+	return ret;
+}
+
+static int os_ssl_status(void)
+{
+	int ret;
+	if (!os_ssl_method || !ssl_lock || !os_ssl_method->status)
+		return 0;
+	lock_get(ssl_lock);
+	ret = os_ssl_method->status();
+	lock_release(ssl_lock);
+	return ret;
+}
+
+static RAND_METHOD opensips_ssl_method = {
+	os_ssl_seed,
+	os_ssl_bytes,
+	os_ssl_cleanup,
+	os_ssl_add,
+	os_ssl_pseudorand,
+	os_ssl_status
+};
+#endif
+
+static int mod_load(void)
+{
+	/*
+	 * this has to be called before any function calling CRYPTO_malloc,
+	 * CRYPTO_malloc will set allow_customize in openssl to 0
+	 */
+
+	LM_INFO("openssl version: %s\n", SSLeay_version(SSLEAY_VERSION));
+	if (!CRYPTO_set_mem_functions(os_malloc, os_realloc, os_free)) {
+		LM_ERR("unable to set the memory allocation functions\n");
+		LM_ERR("NOTE: please make sure you are loading tls_mgm module at the"
+			"very beginning of your script, before any other module!\n");
+		return -1;
+	}
+
+	return 0;
+}
+
+
 static int mod_init(void) {
 	str s;
 #if (OPENSSL_VERSION_NUMBER < 0x10100000L)
@@ -1689,23 +1846,9 @@ static int mod_init(void) {
 		s.s = tls_domain_avp;
 		s.len = strlen(s.s);
 		if (parse_avp_spec( &s, &tls_client_domain_avp)) {
-			LM_ERR("cannot parse tls_client_avp");
+			LM_ERR("cannot parse tls_client_avp\n");
 			return -1;
 		}
-	}
-
-	/*
-	 * this has to be called before any function calling CRYPTO_malloc,
-	 * CRYPTO_malloc will set allow_customize in openssl to 0
-	 */
-
-	LM_INFO("openssl version: %s\n", SSLeay_version(SSLEAY_VERSION));
-	if (!CRYPTO_set_mem_functions(os_malloc, os_realloc, os_free)) {
-		LM_ERR("unable to set the memory allocation functions\n");
-		LM_ERR("NOTE: check if you are using openssl 1.0.1e-fips, (or other "
-			"FIPS version of openssl, as this is known to be broken; if so, "
-			"you need to upgrade or downgrade to a different openssl version!\n");
-		return -1;
 	}
 
 #if !defined(OPENSSL_NO_COMP)
@@ -1730,8 +1873,27 @@ static int mod_init(void) {
 	SSL_library_init();
 	SSL_load_error_strings();
 #else
-	OPENSSL_init_ssl(OPENSSL_INIT_SSL_DEFAULT, NULL);
+	OPENSSL_init_ssl(OPENSSL_INIT_SSL_DEFAULT
+#if (OPENSSL_VERSION_NUMBER >= 0x1010102fL)
+			|OPENSSL_INIT_NO_ATEXIT
 #endif
+			, NULL);
+#endif
+
+#if (OPENSSL_VERSION_NUMBER >= 0x10100000L)
+	ssl_lock = lock_alloc();
+	if (!ssl_lock || !lock_init(ssl_lock)) {
+		LM_ERR("could not initialize ssl lock!\n");
+		return -1;
+	}
+	os_ssl_method = RAND_get_rand_method();
+	if (!os_ssl_method) {
+		LM_ERR("could not get the default ssl rand method!\n");
+		return -1;
+	}
+	RAND_set_rand_method(&opensips_ssl_method);
+#endif
+
 	init_ssl_methods();
 
 #if (OPENSSL_VERSION_NUMBER < 0x10100000L)
@@ -1845,6 +2007,7 @@ static int mod_init(void) {
 
 static void mod_destroy(void)
 {
+	int i;
 	struct tls_domain *d;
 
 	if (dom_lock)
@@ -1852,49 +2015,37 @@ static void mod_destroy(void)
 
 	d = *tls_server_domains;
 	while (d) {
-		if (d->ctx)
-			SSL_CTX_free(d->ctx);
+		if (d->ctx) {
+			for (i = 0; i < d->ctx_no; i++)
+				SSL_CTX_free(d->ctx[i]);
+			shm_free(d->ctx);
+		}
 		lock_destroy(d->lock);
 		lock_dealloc(d->lock);
 		d = d->next;
 	}
 	d = *tls_client_domains;
 	while (d) {
-		if (d->ctx)
-			SSL_CTX_free(d->ctx);
+		if (d->ctx) {
+			for (i = 0; i < d->ctx_no; i++)
+				SSL_CTX_free(d->ctx[i]);
+			shm_free(d->ctx);
+		}
 		lock_destroy(d->lock);
 		lock_dealloc(d->lock);
 		d = d->next;
 	}
 
-	if (*tls_default_server_domain != tls_def_srv_dom_orig) {
-		if (tls_def_srv_dom_orig->ctx)
-			SSL_CTX_free(tls_def_srv_dom_orig->ctx);
-		lock_destroy(tls_def_srv_dom_orig->lock);
-		lock_dealloc(tls_def_srv_dom_orig->lock);
-		shm_free(tls_def_srv_dom_orig);
-	}
+	if (*tls_default_server_domain != tls_def_srv_dom_orig)
+		destroy_tls_dom(tls_def_srv_dom_orig);
 
-	if (*tls_default_client_domain != tls_def_cli_dom_orig) {
-		if (tls_def_cli_dom_orig->ctx)
-			SSL_CTX_free(tls_def_cli_dom_orig->ctx);
-		lock_destroy(tls_def_cli_dom_orig->lock);
-		lock_dealloc(tls_def_cli_dom_orig->lock);
-		shm_free(tls_def_cli_dom_orig);
-	}
+	if (*tls_default_client_domain != tls_def_cli_dom_orig)
+		destroy_tls_dom(tls_def_cli_dom_orig);
 
-	if ((*tls_default_server_domain)->ctx)
-		SSL_CTX_free((*tls_default_server_domain)->ctx);
-	lock_destroy((*tls_default_server_domain)->lock);
-	lock_dealloc((*tls_default_server_domain)->lock);
-	shm_free(*tls_default_server_domain);
+	destroy_tls_dom(*tls_default_server_domain);
 	shm_free(tls_default_server_domain);
 
-	if ((*tls_default_client_domain)->ctx)
-		SSL_CTX_free((*tls_default_client_domain)->ctx);
-	lock_destroy((*tls_default_client_domain)->lock);
-	lock_dealloc((*tls_default_client_domain)->lock);
-	shm_free(*tls_default_client_domain);
+	destroy_tls_dom(*tls_default_client_domain);
 	shm_free(tls_default_client_domain);
 
 	tls_free_domains();
@@ -1910,68 +2061,6 @@ static void mod_destroy(void)
 	EVP_cleanup();
 	CRYPTO_cleanup_all_ex_data();
 	return;
-}
-
-static int is_peer_verified(struct sip_msg* msg, char* foo, char* foo2)
-{
-	struct tcp_connection *c;
-	SSL *ssl;
-	long ssl_verify;
-	X509 *x509_cert;
-
-	LM_DBG("started...\n");
-	if (msg->rcv.proto != PROTO_TLS) {
-		LM_ERR("proto != TLS --> peer can't be verified, return -1\n");
-		return -1;
-	}
-
-	LM_DBG("trying to find TCP connection of received message...\n");
-	/* what if we have multiple connections to the same remote socket? e.g. we can have
-	   connection 1: localIP1:localPort1 <--> remoteIP:remotePort
-	   connection 2: localIP2:localPort2 <--> remoteIP:remotePort
-	   but I think the is very unrealistic */
-	tcp_conn_get(0, &(msg->rcv.src_ip), msg->rcv.src_port, PROTO_TLS, &c, NULL/*fd*/);
-	if (c==NULL) {
-		LM_ERR("no corresponding TLS/TCP connection found."
-				" This should not happen... return -1\n");
-		return -1;
-	}
-	LM_DBG("corresponding TLS/TCP connection found. s=%d, fd=%d, id=%d\n",
-			c->s, c->fd, c->id);
-
-	if (!c->extra_data) {
-		LM_ERR("no extra_data specified in TLS/TCP connection found."
-				" This should not happen... return -1\n");
-		goto error;
-	}
-
-	ssl = (SSL *) c->extra_data;
-
-	ssl_verify = SSL_get_verify_result(ssl);
-	if ( ssl_verify != X509_V_OK ) {
-		LM_INFO("verification of presented certificate failed... return -1\n");
-		goto error;
-	}
-
-	/* now, we have only valid peer certificates or peers without certificates.
-	 * Thus we have to check for the existence of a peer certificate
-	 */
-	x509_cert = SSL_get_peer_certificate(ssl);
-	if ( x509_cert == NULL ) {
-		LM_INFO("peer did not presented "
-				"a certificate. Thus it could not be verified... return -1\n");
-		goto error;
-	}
-
-	X509_free(x509_cert);
-
-	tcp_conn_release(c, 0);
-
-	LM_DBG("peer is successfully verified... done\n");
-	return 1;
-error:
-	tcp_conn_release(c, 0);
-	return -1;
 }
 
 static int tls_get_handshake_timeout(void)

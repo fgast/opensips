@@ -474,17 +474,9 @@ error01:
 		/* destroy all the bavps added, the path vector and the destination,
 		 * since this branch will never be properly added to
 		 * the UAC list, otherwise we'll have memory leaks - razvanc */
-		if (t->uac[branch].user_avps)
-			destroy_avp_list(&t->uac[branch].user_avps);
-		if (t->uac[branch].path_vec.s)
-			shm_free(t->uac[branch].path_vec.s);
-		if (t->uac[branch].adv_address.s)
-			shm_free(t->uac[branch].adv_address.s);
-		if (t->uac[branch].adv_port.s)
-			shm_free(t->uac[branch].adv_port.s);
-		if (t->uac[branch].duri.s)
-			shm_free(t->uac[branch].duri.s);
-		memset(&t->uac[branch],0,sizeof(t->uac[branch]));
+		clean_branch(t->uac[branch]);
+		memset(&t->uac[branch], 0, sizeof(t->uac[branch]));
+		init_branch(&t->uac[branch], branch, t->wait_tl.set, t);
 	}
 error:
 	return ret;
@@ -636,8 +628,12 @@ void cancel_invite(struct sip_msg *cancel_msg,
 
 	get_cancel_reason(cancel_msg, t_cancel->flags, &reason);
 
+	LOCK_REPLIES(t_invite);
+	/* we need to check which branches should be canceled under lock to avoid
+	 * concurrency with replies that are coming in the same time */
 	/* generate local cancels for all branches */
 	which_cancel(t_invite, &cancel_bitmap );
+	UNLOCK_REPLIES(t_invite);
 
 	set_cancel_extra_hdrs( reason.s, reason.len);
 	cancel_uacs(t_invite, cancel_bitmap );
@@ -809,6 +805,14 @@ int t_forward_nonack( struct cell *t, struct sip_msg* p_msg ,
 			if (t->uac[i].br_flags & tcp_no_new_conn_bflag)
 				tcp_no_new_conn = 1;
 
+			/* successfully sent out -> run callbacks */
+			if ( has_tran_tmcbs( t, TMCB_REQUEST_BUILT) ) {
+				set_extra_tmcb_params( &t->uac[i].request.buffer,
+					&t->uac[i].request.dst);
+				run_trans_callbacks( TMCB_REQUEST_BUILT, t,
+					p_msg, 0, 0);
+			}
+
 			do {
 				if (check_blacklists( t->uac[i].request.dst.proto,
 				&t->uac[i].request.dst.to,
@@ -817,6 +821,8 @@ int t_forward_nonack( struct cell *t, struct sip_msg* p_msg ,
 					LM_DBG("blocked by blacklists\n");
 					ser_error=E_IP_BLOCKED;
 				} else {
+					set_extra_tmcb_params( &t->uac[i].request.buffer,
+							&t->uac[i].request.dst);
 					run_trans_callbacks(TMCB_PRE_SEND_BUFFER, t, p_msg, 0, i);
 
 					if (SEND_BUFFER( &t->uac[i].request)==0) {
@@ -853,10 +859,10 @@ int t_forward_nonack( struct cell *t, struct sip_msg* p_msg ,
 			set_kr(REQ_FWDED);
 
 			/* successfully sent out -> run callbacks */
-			if ( has_tran_tmcbs( t, TMCB_REQUEST_BUILT|TMCB_MSG_SENT_OUT) ) {
+			if ( has_tran_tmcbs( t, TMCB_MSG_SENT_OUT) ) {
 				set_extra_tmcb_params( &t->uac[i].request.buffer,
 					&t->uac[i].request.dst);
-				run_trans_callbacks( TMCB_REQUEST_BUILT|TMCB_MSG_SENT_OUT, t,
+				run_trans_callbacks( TMCB_MSG_SENT_OUT, t,
 					p_msg, 0, 0);
 			}
 

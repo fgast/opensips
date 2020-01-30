@@ -157,7 +157,8 @@ struct module_exports exports = {
 	MOD_TYPE_DEFAULT,/* class of this module */
 	MODULE_VERSION,
 	DEFAULT_DLFLAGS,
-	NULL,            /* OpenSIPS module dependencies */
+	0,          /* load function */
+	NULL,       /* OpenSIPS module dependencies */
 	cmds,       /* Exported functions */
 	0,          /* Exported async functions */
 	params,     /* Exported parameters */
@@ -166,6 +167,7 @@ struct module_exports exports = {
 	mod_items,  /* exported pseudo-variables */
 	0,			/* exported transformations */
 	0,          /* extra processes */
+	0,          /* module pre-initialization function */
 	mod_init,   /* module initialization function */
 	0,          /* response function */
 	destroy,    /* destroy function */
@@ -677,7 +679,7 @@ static struct mi_root* mi_bm_poll_results(struct mi_root *cmd, void *param)
 
 	rpl_tree = init_mi_tree( 200, MI_OK_S, MI_OK_LEN);
 	if (rpl_tree==NULL) {
-		LM_ERR("Could not allocate the reply mi tree");
+		LM_ERR("Could not allocate the reply mi tree\n");
 		return NULL;
 	}
 	rpl_tree->node.flags |= MI_IS_ARRAY;

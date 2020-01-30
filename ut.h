@@ -816,6 +816,25 @@ static inline int pkg_str_dup(str* dst, const str* src)
 	return 0;
 }
 
+/*
+ * Make a copy of a str structure using pkg_malloc
+ *	  + an additional '\0' byte, so you can make use of dst->s
+ */
+static inline int pkg_nt_str_dup(str* dst, const str* src)
+{
+	dst->s = pkg_malloc(src->len + 1);
+	if (!dst->s) {
+		LM_ERR("no private memory left\n");
+		dst->len = 0;
+		return -1;
+	}
+
+	memcpy(dst->s, src->s, src->len);
+	dst->len = src->len;
+	dst->s[dst->len] = '\0';
+	return 0;
+}
+
 static inline char *pkg_strdup(const char *str)
 {
 	char *rval;
@@ -899,16 +918,14 @@ static inline char* str_strstr(const str *stra, const str *strb)
 
 	if (stra==NULL || strb==NULL || stra->s==NULL || strb->s==NULL
 			|| stra->len<=0 || strb->len<=0) {
-		LM_ERR("bad parameters\n");
+#ifdef EXTRA_DEBUG
+		LM_DBG("bad parameters\n");
+#endif
 		return NULL;
 	}
 
-	if (strb->len > stra->len) {
-		LM_ERR("string to find should be smaller than the string"
-				"to search into\n");
+	if (strb->len > stra->len)
 		return NULL;
-	}
-
 
 	len=0;
 	while (stra->len-len >= strb->len){
@@ -943,7 +960,9 @@ static inline int str_strncasecmp(const str *stra, const str *strb, int n)
 	if(stra==NULL || strb==NULL || stra->s ==NULL || strb->s==NULL
 	|| stra->len<0 || strb->len<0)
 	{
-		LM_ERR("bad parameters\n");
+#ifdef EXTRA_DEBUG
+		LM_DBG("bad parameters\n");
+#endif
 		return -2;
 	}
 
@@ -978,7 +997,9 @@ static inline int str_strcasecmp(const str *stra, const str *strb)
 	if(stra==NULL || strb==NULL || stra->s ==NULL || strb->s==NULL
 	|| stra->len<0 || strb->len<0)
 	{
-		LM_ERR("bad parameters\n");
+#ifdef EXTRA_DEBUG
+		LM_DBG("bad parameters\n");
+#endif
 		return -2;
 	}
 	alen = stra->len;

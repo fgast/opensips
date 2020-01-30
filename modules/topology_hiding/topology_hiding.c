@@ -94,6 +94,7 @@ static module_dependency_t *get_deps_dialog(param_export_t *param)
 static dep_export_t deps = {
 	{ /* OpenSIPS module dependencies */
 		{ MOD_TYPE_DEFAULT, "tm", DEP_ABORT },
+		{ MOD_TYPE_DEFAULT, "dialog", DEP_SILENT },
 		{ MOD_TYPE_NULL, NULL, 0 },
 	},
 	{ /* modparam dependencies */
@@ -107,6 +108,7 @@ struct module_exports exports= {
 	MOD_TYPE_DEFAULT, /* class of this module */
 	MODULE_VERSION,
 	DEFAULT_DLFLAGS,  /* dlopen flags */
+	0,				  /* load function */
 	&deps,            /* OpenSIPS module dependencies */
 	cmds,             /* exported functions */
 	0,                /* exported async functions */
@@ -116,6 +118,7 @@ struct module_exports exports= {
 	pvars,            /* exported pseudo-variables */
 	0,				  /* exported transformations */
 	0,                /* extra processes */
+	0,                /* module pre-initialization function */
 	mod_init,         /* module initialization function */
 	(response_function) 0,
 	mod_destroy,
@@ -130,6 +133,7 @@ static int mod_init(void)
 	topo_hiding_prefix.len = strlen(topo_hiding_prefix.s);
 	topo_hiding_seed.len = strlen(topo_hiding_seed.s);
 	th_contact_encode_param.len = strlen(th_contact_encode_param.s);
+	topo_hiding_ct_encode_pw.len = strlen(topo_hiding_ct_encode_pw.s);
 	if (topo_hiding_ct_params.s) {
 		topo_hiding_ct_params.len = strlen(topo_hiding_ct_params.s);
 		topo_parse_passed_ct_params(&topo_hiding_ct_params);
@@ -282,7 +286,6 @@ static int pv_topo_callee_callid(struct sip_msg *msg, pv_param_t *param, pv_valu
 {
 	struct dlg_cell *dlg;
 	int req_len = 0,i;
-	char *p;
 
 	if(res==NULL)
 		return -1;
@@ -293,7 +296,7 @@ static int pv_topo_callee_callid(struct sip_msg *msg, pv_param_t *param, pv_valu
 	}
 
 
-	req_len = calc_base64_encode_len(dlg->callid.len) + topo_hiding_prefix.len;
+	req_len = calc_word64_encode_len(dlg->callid.len) + topo_hiding_prefix.len;
 
 	if (req_len*2 > callid_buf_len) {
 		callid_buf = pkg_realloc(callid_buf,req_len*2);
@@ -309,14 +312,8 @@ static int pv_topo_callee_callid(struct sip_msg *msg, pv_param_t *param, pv_valu
 	for (i=0;i<dlg->callid.len;i++)
 		callid_buf[i] = dlg->callid.s[i] ^ topo_hiding_seed.s[i%topo_hiding_seed.len];
 
-	base64encode((unsigned char *)(callid_buf+topo_hiding_prefix.len+req_len),
+	word64encode((unsigned char *)(callid_buf+topo_hiding_prefix.len+req_len),
 		     (unsigned char *)(callid_buf),dlg->callid.len);
-
-	p = callid_buf+ 2*req_len - 1;
-	while (*p == '=') {
-		*p = '-';
-		p--;
-	}
 
 	res->rs.s = callid_buf+req_len;
 	res->rs.len = req_len;

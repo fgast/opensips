@@ -1,4 +1,4 @@
-%if 0%{?rhel}
+%if 0%{?rhel} > 0 && 0%{?rhel} < 8
 # copied from lm_sensors exclusive arch
 %ifnarch alpha i386 i486 i586 i686 pentium3 pentium4 athlon x86_64
 %global _without_snmpstats 1
@@ -17,15 +17,19 @@
 %global _with_cachedb_mongodb 1
 %endif
 
-%if 0%{?fedora} > 23
+%if 0%{?rhel} > 7 || 0%{?fedora} > 23
 %global _without_aaa_radius 1
 %endif
 
-%global EXCLUDE_MODULES %{!?_with_cachedb_cassandra:cachedb_cassandra} %{!?_with_cachedb_couchbase:cachedb_couchbase} %{!?_with_cachedb_mongodb:cachedb_mongodb} %{!?_with_cachedb_redis:cachedb_redis} %{!?_with_db_oracle:db_oracle} %{!?_with_osp:osp} %{!?_with_sngtc:sngtc} %{?_without_aaa_radius:aaa_radius} %{?_without_db_perlvdb:db_perlvdb} %{?_without_snmpstats:snmpstats}
+%if 0%{?rhel} > 7 || 0%{?fedora} > 30
+%global _without_python 1
+%endif
+
+%global EXCLUDE_MODULES %{!?_with_cachedb_cassandra:cachedb_cassandra} %{!?_with_cachedb_couchbase:cachedb_couchbase} %{!?_with_cachedb_mongodb:cachedb_mongodb} %{!?_with_cachedb_redis:cachedb_redis} %{!?_with_db_oracle:db_oracle} %{!?_with_osp:osp} %{!?_with_sngtc:sngtc} %{?_without_aaa_radius:aaa_radius} %{?_without_db_perlvdb:db_perlvdb} %{?_without_snmpstats:snmpstats} %{?_without_python:python}
 
 Summary:  Open Source SIP Server
 Name:     opensips
-Version:  2.4.2
+Version:  2.4.7
 Release:  1%{?dist}
 License:  GPLv2+
 Group:    System Environment/Daemons
@@ -48,7 +52,7 @@ BuildRequires:  openssl-devel
 BuildRequires:  expat-devel
 BuildRequires:  xmlrpc-c-devel
 BuildRequires:  libconfuse-devel
-%if 0%{?rhel}
+%if 0%{?rhel} > 0 && 0%{?rhel} < 8
 BuildRequires:  db4-devel
 %else
 BuildRequires:  libdb-devel
@@ -57,7 +61,9 @@ BuildRequires:  openldap-devel
 BuildRequires:  curl-devel
 BuildRequires:  GeoIP-devel
 BuildRequires:  pcre-devel
+%if 0%{!?_without_python:1}
 BuildRequires:  python-devel
+%endif
 %if 0%{?fedora} > 16 || 0%{?rhel} > 6
 BuildRequires:  systemd-units
 %endif
@@ -516,7 +522,7 @@ The LDAP module implements an LDAP search interface for OpenSIPS.
 Summary:  Call LUA scripts from OpenSIPS cfg
 Group:    System Environment/Daemons
 Requires: %{name} = %{version}-%{release}
-%if 0%{?fedora} > 0
+%if 0%{?rhel} > 7 || 0%{?fedora} > 0
 BuildRequires: compat-lua-devel
 %else
 BuildRequires: lua-devel
@@ -585,7 +591,7 @@ Summary:  Helps implement your own OpenSIPS extensions in Perl
 Group:    System Environment/Daemons
 # require perl-devel for >F7 and perl for <=F6
 BuildRequires:  perl(ExtUtils::MakeMaker)
-%if 0%{?rhel}
+%if 0%{?rhel} > 0 && 0%{?rhel} < 8
 BuildRequires:  perl(ExtUtils::Embed)
 %else
 %if 0%{?rhel} == 5
@@ -830,6 +836,7 @@ This module is a gateway for presence between SIP and XMPP. It translates one
 format into another and uses xmpp, pua and presence modules to manage the
 transmition of presence state information.
 
+%if 0%{!?_without_python:1}
 %package  python
 Summary:  Python scripting support
 Group:    System Environment/Daemons
@@ -837,6 +844,7 @@ Requires: %{name} = %{version}-%{release}
 
 %description  python
 Helps implement your own OpenSIPS extensions in Python
+%endif
 
 %package  rabbitmq
 Summary:  RabbitMQ module
@@ -1056,6 +1064,7 @@ rm -rf $RPM_BUILD_ROOT
   exclude_modules="%EXCLUDE_MODULES" \
   basedir=%{buildroot} prefix=%{_prefix} \
   cfg_prefix=%{buildroot} \
+  cfg_target=%{_sysconfdir}/opensips/ \
   modules_prefix=%{buildroot}/%{_prefix} \
   modules_dir=%{_lib}/%{name}/modules \
   DBTEXTON=yes # fixed dbtext documentation installation
@@ -1368,6 +1377,7 @@ fi
 %{_libdir}/opensips/modules/b2b_logic.so
 %{_libdir}/opensips/modules/b2b_sca.so
 %{_libdir}/opensips/modules/call_center.so
+%attr(640,%{name},%{name}) %config(noreplace) %{_sysconfdir}/opensips/scenario_callcenter.xml
 %doc docdir/README.b2b_entities
 %doc docdir/README.b2b_logic
 %doc docdir/README.b2b_sca
@@ -1684,8 +1694,10 @@ fi
 %{_libdir}/opensips/modules/pua_xmpp.so
 %doc docdir/README.pua_xmpp
 
+%if 0%{!?_without_python:1}
 %files python
 %{_libdir}/opensips/modules/python.so
+%endif
 
 %files rabbitmq
 %{_libdir}/opensips/modules/rabbitmq.so
@@ -1771,7 +1783,7 @@ fi
 %doc docdir/README.xmpp
 
 %changelog
-* Wed Mar 28 2018 Nick Altmann <nick.altmann@gmail.com> - 2.4.2-1
+* Wed Mar 28 2018 Nick Altmann <nick.altmann@gmail.com> - 2.4.7-1
 - Specification updated for opensips 2.4
 - New packages: event_jsonrpc, jsonrpc, siprec
 
